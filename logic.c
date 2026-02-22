@@ -1,0 +1,1 @@
+//A implementação das funções que definimos acima no logic.h, garantindo que não se criam ciclos de expedição.

@@ -1,0 +1,1 @@
+//Gestão das sessões TCP. Funções para accept() novas ligações e connect() para o comando add edge.
