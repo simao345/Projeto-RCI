@@ -30,7 +30,7 @@ server_udp.o: server_udp.c server_udp.h
 network_tcp.o: network_tcp.c network_tcp.h logic.h
 	$(CC) $(CFLAGS) -c network_tcp.c
 
-logic.o: logic.c logic.c
+logic.o: logic.c logic.h
 	$(CC) $(CFLAGS) -c logic.c
 
 # Limpeza de ficheiros temporários
