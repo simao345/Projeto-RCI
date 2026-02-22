@@ -1,7 +1,10 @@
 # Projeto-RCI
 
-join test:
+## Testes
 
+### 1. join test:
+
+    ```bash
     terminal A:
         ncat -u -l 59000 --exec "/bin/echo OKREG DONE"
 
@@ -16,9 +19,10 @@ join test:
     output terminal B:
         Li o comando: j 001 10
         Sucesso: Nó registado no servidor.
+    ```
 
-leave test:
-(first join)
+### 2. leave test:
+    ```bash
     terminal A:
         ncat -u -l 59000 --exec "/bin/echo OKUNREG DONE"
 
@@ -30,9 +34,9 @@ leave test:
     output terminal B:
         Li o comando: leave (l)
         Saida da rede 001 concluida
-
-exit test:
-(first join)
+    ```
+### 3. exit test:
+    ```bash
     terminal A:
         ncat -u -l 59000 --exec "/bin/echo OKUNREG DONE"
 
@@ -46,3 +50,4 @@ exit test:
         A terminar aplicação
 
     terminal B termina processo
+    ```

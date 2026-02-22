@@ -7,6 +7,7 @@
 #include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 // Incluir os teus headers
 #include "interface.h"
@@ -15,6 +16,7 @@
 #include "logic.h"
 
 #define BUFFER_SIZE 256
+
 
 // Estrutura para manter o estado global do nó no main
 typedef struct {
@@ -25,14 +27,43 @@ typedef struct {
     int is_joined;
 } NodeState;
 
+// globais
+NodeState node;
+char regIP_buf[16];   // buffer fixo -> Usar buffer fixo evita dangling pointer e torna SIGINT seguro -> honestamente não sei mas é uma boa prática pelo que estive a ver
+char *regIP;
+int regUDP;  
+
+//Depois mover isto para um ficheiro separado ?
+void sigint_handler(int sig) {
+    if (node.is_joined) {
+        unregister_node(regIP, regUDP, node.net, node.id);
+    }
+    printf("\nA terminar aplicação...\n");
+    exit(0);
+}
+
+
 int main(int argc, char *argv[]) {
+
+    signal(SIGINT, sigint_handler);
+
     // 1. Validar argumentos: OWR IP TCP [regIP regUDP]
     if (argc < 3) {
         fprintf(stderr, "Uso: %s IP TCP [regIP regUDP]\n", argv[0]);
         exit(1);
     }
 
-    NodeState node;
+    if (inet_pton(AF_INET, argv[1], &(struct in_addr){0}) != 1) {
+        fprintf(stderr, "IP inválido.\n");
+        exit(1);
+    }
+    
+    node.myTCP = atoi(argv[2]);
+    if (node.myTCP <= 0 || node.myTCP > 65535) {
+        fprintf(stderr, "Porta TCP inválida.\n");
+        exit(1);
+    }
+
     memset(&node, 0, sizeof(node));
     node.is_joined = 0;
 
@@ -41,8 +72,15 @@ int main(int argc, char *argv[]) {
     node.myTCP = atoi(argv[2]);
 
     // Contactos do servidor (valores por omissão do enunciado [cite: 129])
-    char *regIP = (argc > 3) ? argv[3] : "193.136.138.142";
-    int regUDP = (argc > 4) ? atoi(argv[4]) : 59000;
+    if (argc > 3) {
+        strncpy(regIP_buf, argv[3], sizeof(regIP_buf)-1);
+        regIP_buf[sizeof(regIP_buf)-1] = '\0';
+    } else {
+        snprintf(regIP_buf, sizeof(regIP_buf), "%s", "193.136.138.142");
+    }
+    regIP = regIP_buf;
+
+    regUDP = (argc > 4) ? atoi(argv[4]) : 59000;
 
     printf("Nó OWR iniciado em %s:%d. Servidor: %s:%d\n", node.myIP, node.myTCP, regIP, regUDP);
 
@@ -66,10 +104,15 @@ int main(int argc, char *argv[]) {
         // Tratar entrada do utilizador
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             char buffer[BUFFER_SIZE];
-            char arg_net[4], arg_id[3];
+
+            printf("> "); fflush(stdout);
 
             if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) break;
-            printf("Li o comando: %s", buffer);
+
+            buffer[strcspn(buffer, "\n")] = 0; //aquele shenanigan do lab 1 para tirar o \n
+            char arg_net[4], arg_id[3];
+
+            printf("Li o comando: %s \n", buffer);
 
             int cmd_type = parse_user_command(buffer, arg_net, arg_id);
 
@@ -82,6 +125,9 @@ int main(int argc, char *argv[]) {
                             strcpy(node.net, arg_net);
                             strcpy(node.id, arg_id);
                             node.is_joined = 1;
+                            printf("Entrada na rede %s concluida.\n", node.net);
+
+                            //printf("Estado atual: %s%s\n", node.is_joined ? "Registado" : "Não registado", node.is_joined ? node.net : "");
                         }
                     }
                     break;
@@ -94,6 +140,8 @@ int main(int argc, char *argv[]) {
                         if (unregister_node(regIP, regUDP, node.net, node.id) == 0) {
                             node.is_joined = 0;
                             printf("Saída da rede %s concluída.\n", node.net);
+
+                            //printf("Estado atual: %s%s\n", node.is_joined ? "Registado" : "Não registado", node.is_joined ? node.net : "");
                         }
                     }
                     break;
@@ -121,7 +169,6 @@ int main(int argc, char *argv[]) {
                     }
                     break;
             }
-            printf("> "); fflush(stdout);
         }
     }
 
