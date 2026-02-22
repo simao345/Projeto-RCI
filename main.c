@@ -81,8 +81,7 @@ int main(int argc, char *argv[]) {
     regIP = regIP_buf;
 
     regUDP = (argc > 4) ? atoi(argv[4]) : 59000;
-
-    printf("Nó OWR iniciado em %s:%d. Servidor: %s:%d\n", node.myIP, node.myTCP, regIP, regUDP);
+    printf("> Nó OWR iniciado em %s:%d. Servidor: %s:%d\n", node.myIP, node.myTCP, regIP, regUDP);
 
     while (1) {
         fd_set rfds;
@@ -91,6 +90,8 @@ int main(int argc, char *argv[]) {
         // Monitorizar apenas o teclado para a Etapa 2
         FD_SET(STDIN_FILENO, &rfds);
         int max_fd = STDIN_FILENO;
+
+        printf("> "); fflush(stdout);
 
         // Na Etapa 3, adicionarás aqui o socket de escuta TCP
         
@@ -105,13 +106,12 @@ int main(int argc, char *argv[]) {
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             char buffer[BUFFER_SIZE];
 
-            printf("> "); fflush(stdout);
-
             if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) break;
 
             buffer[strcspn(buffer, "\n")] = 0; //aquele shenanigan do lab 1 para tirar o \n
             char arg_net[4], arg_id[3];
 
+            printf("> "); fflush(stdout);
             printf("Li o comando: %s \n", buffer);
 
             int cmd_type = parse_user_command(buffer, arg_net, arg_id);
