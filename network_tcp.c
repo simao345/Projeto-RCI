@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 int setup_tcp_server(int port) {
     int fd;
@@ -48,5 +49,31 @@ int setup_tcp_server(int port) {
     }
 
     // Retorna o File Descriptor para o main() poder usá-lo no select()
+    return fd;
+}
+
+int setup_tcp_client(char *ip, int port) {
+    int fd;
+    struct sockaddr_in server_addr;
+
+    // 1. Criar o socket TCP
+    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("Erro ao criar socket cliente TCP");
+        return -1;
+    }
+
+    // 2. Configurar o endereço do nó de destino
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr(ip);
+    server_addr.sin_port = htons(port);
+
+    // 3. Tentar conectar
+    if (connect(fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
+        perror("Erro ao conectar ao vizinho");
+        close(fd);
+        return -1;
+    }
+
     return fd;
 }

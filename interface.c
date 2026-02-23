@@ -35,6 +35,14 @@ int parse_user_command(char *buffer, char *net, char *id) {
         // o sscanf não preenche o arg_net, o que está previsto no teu main.
         return 4;
     }
+    // DIRECT
+    else if (strcmp(cmd, "direct") == 0 || strcmp(cmd, "d") == 0) {
+        if (num < 3) {
+            printf("Erro: uso correto: d IP TCP\n");
+            return 0;
+        }
+        return 5; // Retornamos 5 para o main saber que é o comando direct
+    }
     
     printf("Comando desconhecido: %s\n", cmd);
     return 0;

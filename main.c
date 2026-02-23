@@ -154,6 +154,7 @@ int main(int argc, char *argv[]) {
         // ==========================================
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             char buffer[BUFFER_SIZE];
+            char arg_net[4], arg_id[20];
 
             if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) break;
 
@@ -210,7 +211,20 @@ int main(int argc, char *argv[]) {
                         printf("Erro: Indica a rede ou regista-te primeiro (uso: n <net>).\n");
                     }
                     break;
-                    
+                case 5: // DIRECT (d)
+                    if (node.next_fd != -1) {
+                        printf("Erro: Já tens uma ligação de saída (next_fd = %d).\n", node.next_fd);
+                    } else {
+                        int target_port = atoi(arg_id); // arg_id tem a porta
+                        int fd = setup_tcp_client(arg_net, target_port); // arg_net tem o IP
+                        
+                        if (fd != -1) {
+                            node.next_fd = fd;
+                            printf("[TCP] Ligação direta estabelecida com %s:%d (next_fd = %d)\n", arg_net, target_port, fd);
+                        }
+                    }
+                    break;
+
                 default:
                     // Comandos desconhecidos (tratado no interface.c)
                     break;
