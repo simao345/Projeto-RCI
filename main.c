@@ -25,6 +25,8 @@ typedef struct {
     char myIP[16];
     int myTCP;
     int is_joined;
+    int prev_fd; // Socket de quem se ligou a mim (antecessor no anel)
+    int next_fd; // Socket a quem eu me liguei (sucessor no anel)
 } NodeState;
 
 // globais
@@ -66,6 +68,8 @@ int main(int argc, char *argv[]) {
 
     memset(&node, 0, sizeof(node));
     node.is_joined = 0;
+    node.prev_fd = -1;
+    node.next_fd = -1;
 
     // Guardar contactos locais
     strcpy(node.myIP, argv[1]);
@@ -83,17 +87,33 @@ int main(int argc, char *argv[]) {
     regUDP = (argc > 4) ? atoi(argv[4]) : 59000;
     printf("> Nó OWR iniciado em %s:%d. Servidor: %s:%d\n", node.myIP, node.myTCP, regIP, regUDP);
 
+    // ==========================================
+    // INICIAR SERVIDOR TCP
+    // ==========================================
+    int listen_fd = setup_tcp_server(node.myTCP);
+    if (listen_fd == -1) {
+        fprintf(stderr, "Erro ao iniciar o servidor TCP na porta %d.\n", node.myTCP);
+        exit(1);
+    }
+    printf("Servidor TCP à escuta na porta %d...\n> ", node.myTCP);
+    fflush(stdout);
+
     while (1) {
         fd_set rfds;
         FD_ZERO(&rfds);
         
-        // Monitorizar apenas o teclado para a Etapa 2
+        // 1. Monitorizar o teclado
         FD_SET(STDIN_FILENO, &rfds);
         int max_fd = STDIN_FILENO;
 
         printf("> "); fflush(stdout);
 
         // Na Etapa 3, adicionarás aqui o socket de escuta TCP
+        // 2. Monitorizar o socket de escuta TCP
+        FD_SET(listen_fd, &rfds);
+        if (listen_fd > max_fd) {
+            max_fd = listen_fd;
+        }
         
         int activity = select(max_fd + 1, &rfds, NULL, NULL, NULL);
 
@@ -102,7 +122,36 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        // Tratar entrada do utilizador
+        // ==========================================
+        // A. TRATAR NOVAS LIGAÇÕES TCP (O OUTRO NÓ)
+        // ==========================================
+        if (FD_ISSET(listen_fd, &rfds)) {
+            struct sockaddr_in client_addr;
+            socklen_t addrlen = sizeof(client_addr);
+            
+            int new_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &addrlen);
+            
+            if (new_fd == -1) {
+                perror("Erro no accept");
+            } else {
+                printf("\n[TCP] Nova ligação recebida do IP: %s\n", inet_ntoa(client_addr.sin_addr));
+                
+                // Se ainda não temos antecessor, aceitamos e guardamos o socket
+                if (node.prev_fd == -1) {
+                    node.prev_fd = new_fd;
+                    printf("[TCP] Nó guardado como meu antecessor (prev_fd = %d).\n", new_fd);
+                } else {
+                    // Por enquanto rejeitamos se já tivermos um (para simplificar nesta fase)
+                    printf("[TCP] Já tenho um antecessor. A fechar a nova ligação.\n");
+                    close(new_fd);
+                }
+                printf("> "); fflush(stdout);
+            }
+        }
+
+        // ==========================================
+        // B. TRATAR ENTRADA DO UTILIZADOR (TECLADO)
+        // ==========================================
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             char buffer[BUFFER_SIZE];
 
@@ -133,7 +182,6 @@ int main(int argc, char *argv[]) {
                     break;
 
                 case 2: // LEAVE (l)
-                    
                     if (!node.is_joined) {
                         printf("O nó não está registado em nenhuma rede.\n");
                     } else {
@@ -153,13 +201,7 @@ int main(int argc, char *argv[]) {
                     printf("A terminar aplicação...\n");
                     exit(0);
 
-                default:
-                    // Outros comandos (show, add edge) serão tratados nas próximas etapas
-                    break;
-
                 case 4: // NODES (n)
-                    // Se o utilizador escreveu "n 001", o parse_user_command deve guardar "001" em arg_net
-                    // Se o utilizador escreveu apenas "n" e já estiver em join, usamos node.net
                     if (strlen(arg_net) > 0) {
                         nodes_query(arg_net, regIP, regUDP);
                     } else if (node.is_joined) {
@@ -167,6 +209,10 @@ int main(int argc, char *argv[]) {
                     } else {
                         printf("Erro: Indica a rede ou regista-te primeiro (uso: n <net>).\n");
                     }
+                    break;
+                    
+                default:
+                    // Comandos desconhecidos (tratado no interface.c)
                     break;
             }
         }
