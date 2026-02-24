@@ -159,7 +159,6 @@ int main(int argc, char *argv[]) {
             if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) break;
 
             buffer[strcspn(buffer, "\n")] = 0; //aquele shenanigan do lab 1 para tirar o \n
-            char arg_net[4], arg_id[3];
 
             printf("> "); fflush(stdout);
             printf("Li o comando: %s \n", buffer);
