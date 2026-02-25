@@ -47,6 +47,7 @@ int register_node(char* regIP, int regUDP, char* net, char* id, char* myIP, int 
 
     // Formato V2: REG tid op net id IP TCP\n (op = 0 para registar) 
     sprintf(message, "REG %s 0 %s %s %s %d\n", tid, net, id, myIP, myTCP);
+    printf("Enviado: %s", message); // <-- IMPRIME O QUE É ENVIADO
 
     if (sendto(fd, message, strlen(message), 0, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
         perror("Erro no sendto");
@@ -61,27 +62,24 @@ int register_node(char* regIP, int regUDP, char* net, char* id, char* myIP, int 
     
     if (n > 0) {
         buffer[n] = '\0';
+        // <-- IMPRIME O QUE É RECEBIDO
+        printf("Recebido: %s", buffer); 
+        if (buffer[strlen(buffer)-1] != '\n') printf("\n"); // Garante a mudança de linha
+
         char expected_success[32];
-        char expected_full[32];
         sprintf(expected_success, "REG %s 1", tid); // op = 1 (sucesso) 
-        sprintf(expected_full, "REG %s 2", tid);    // op = 2 (base de dados cheia) 
 
         if (strstr(buffer, expected_success) != NULL) {
-            printf("Sucesso: Nó registado no servidor.\n");
             close(fd);
             return 0; 
-        } else if (strstr(buffer, expected_full) != NULL) {
-            printf("Erro: A base de dados do servidor está cheia.\n");
-            close(fd);
-            return -1;
         } else {
-            printf("Erro: Resposta inesperada do servidor: %s\n", buffer);
+            // Qualquer outra resposta (incluindo erro 2) é tratada como falha
             close(fd);
             return -1;
         }
     }
 
-    printf("Erro: Servidor de nós não respondeu corretamente (Timeout).\n");
+    printf("Erro: Servidor de nós não respondeu (Timeout).\n");
     close(fd);
     return -1;
 }
@@ -113,6 +111,7 @@ int unregister_node(char* regIP, int regUDP, char* net, char* id) {
 
     // Formato V2: REG tid op net id (op = 3 para solicitar remoção, sem campos IP e TCP) 
     sprintf(message, "REG %s 3 %s %s\n", tid, net, id);
+    printf("Enviado: %s", message); // <-- IMPRIME O QUE É ENVIADO
 
     sendto(fd, message, strlen(message), 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
 
@@ -122,6 +121,9 @@ int unregister_node(char* regIP, int regUDP, char* net, char* id) {
 
     if (n > 0) {
         buffer[n] = '\0';
+        printf("Recebido: %s", buffer); // <-- IMPRIME O QUE É RECEBIDO
+        if (buffer[strlen(buffer)-1] != '\n') printf("\n");
+        
         char expected_success[32];
         sprintf(expected_success, "REG %s 4", tid); // op = 4 (confirmação de remoção) 
         
@@ -163,6 +165,7 @@ void nodes_query(char* net, char* server_ip, int server_port) {
 
     // Formato V2: NODES tid op net\n (op = 0 para solicitar a lista de nós) 
     sprintf(message, "NODES %s 0 %s\n", tid, net);
+    printf("Enviado: %s", message); // <-- IMPRIME O QUE É ENVIADO
 
     sendto(fd, message, strlen(message), 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
 
@@ -171,20 +174,9 @@ void nodes_query(char* net, char* server_ip, int server_port) {
 
     if (n > 0) {
         buffer[n] = '\0'; 
-        char expected_success[32];
-        sprintf(expected_success, "NODES %s 1", tid); // op = 1 (resposta de sucesso contendo os nós) 
+        printf("Recebido:\n%s", buffer); // <-- IMPRIME O QUE É RECEBIDO (sem formatações extra)
+        if (buffer[strlen(buffer)-1] != '\n') printf("\n");
 
-        if (strncmp(buffer, expected_success, strlen(expected_success)) == 0) {
-            // Avança o ponteiro para a linha de baixo para não imprimir o "NODES 123 1 001"
-            char *list_start = strchr(buffer, '\n');
-            if (list_start != NULL) {
-                printf("Lista de Nós na rede %s:%s", net, list_start + 1);
-            } else {
-                printf("Lista de Nós na rede %s:\n%s", net, buffer);
-            }
-        } else {
-            printf("Erro na resposta do servidor: %s\n", buffer);
-        }
     } else {
         printf("Erro: Não foi possível obter a lista de nós (Timeout).\n");
     }

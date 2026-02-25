@@ -13,10 +13,8 @@
 #include "interface.h"
 #include "server_udp.h"
 #include "network_tcp.h"
-#include "logic.h"
 
 #define BUFFER_SIZE 256
-
 
 // Estrutura para manter o estado global do nó no main
 typedef struct {
@@ -31,11 +29,10 @@ typedef struct {
 
 // globais
 NodeState node;
-char regIP_buf[16];   // buffer fixo -> Usar buffer fixo evita dangling pointer e torna SIGINT seguro -> honestamente não sei mas é uma boa prática pelo que estive a ver
+char regIP_buf[128];  // buffer aumentado para suportar nomes de domínio
 char *regIP;
 int regUDP;  
 
-//Depois mover isto para um ficheiro separado ?
 void sigint_handler(int sig) {
     if (node.is_joined) {
         unregister_node(regIP, regUDP, node.net, node.id);
@@ -44,25 +41,24 @@ void sigint_handler(int sig) {
     exit(0);
 }
 
-
 int main(int argc, char *argv[]) {
 
     signal(SIGINT, sigint_handler);
 
-    // 1. Validar argumentos: OWR IP TCP [regIP regUDP]
-    if (argc < 3) {
-        fprintf(stderr, "Uso: %s IP TCP [regIP regUDP]\n", argv[0]);
+    // 1. Validar número de argumentos (Entre 3 e 5)
+    if (argc < 3 || argc > 5) {
+        fprintf(stderr, "Erro de invocação.\nUso correto: %s IP TCP [regIP] [regUDP]\n", argv[0]);
         exit(1);
     }
 
     if (inet_pton(AF_INET, argv[1], &(struct in_addr){0}) != 1) {
-        fprintf(stderr, "IP inválido.\n");
+        fprintf(stderr, "Erro: IP do nó inválido.\n");
         exit(1);
     }
     
     node.myTCP = atoi(argv[2]);
     if (node.myTCP <= 0 || node.myTCP > 65535) {
-        fprintf(stderr, "Porta TCP inválida.\n");
+        fprintf(stderr, "Erro: Porta TCP inválida.\n");
         exit(1);
     }
 
@@ -75,16 +71,26 @@ int main(int argc, char *argv[]) {
     strcpy(node.myIP, argv[1]);
     node.myTCP = atoi(argv[2]);
 
-    // Contactos do servidor (valores por omissão do enunciado [cite: 129])
-    if (argc > 3) {
+    // 2. Definir valores por omissão para o servidor (conforme o enunciado)
+    strncpy(regIP_buf, "193.136.138.142", sizeof(regIP_buf)-1);
+    regIP_buf[sizeof(regIP_buf)-1] = '\0';
+    regIP = regIP_buf;
+    regUDP = 59000;
+
+    // 3. Substituir valores por omissão se forem fornecidos na invocação
+    if (argc >= 4) {
         strncpy(regIP_buf, argv[3], sizeof(regIP_buf)-1);
         regIP_buf[sizeof(regIP_buf)-1] = '\0';
-    } else {
-        snprintf(regIP_buf, sizeof(regIP_buf), "%s", "193.136.138.142");
+        regIP = regIP_buf;
     }
-    regIP = regIP_buf;
+    if (argc == 5) {
+        regUDP = atoi(argv[4]);
+        if (regUDP <= 0 || regUDP > 65535) {
+            fprintf(stderr, "Erro: Porta UDP do servidor inválida.\n");
+            exit(1);
+        }
+    }
 
-    regUDP = (argc > 4) ? atoi(argv[4]) : 59000;
     printf("> Nó OWR iniciado em %s:%d. Servidor: %s:%d\n", node.myIP, node.myTCP, regIP, regUDP);
 
     // ==========================================
@@ -106,13 +112,22 @@ int main(int argc, char *argv[]) {
         FD_SET(STDIN_FILENO, &rfds);
         int max_fd = STDIN_FILENO;
 
-        printf("> "); fflush(stdout);
-
-        // Na Etapa 3, adicionarás aqui o socket de escuta TCP
         // 2. Monitorizar o socket de escuta TCP
         FD_SET(listen_fd, &rfds);
         if (listen_fd > max_fd) {
             max_fd = listen_fd;
+        }
+
+        // 3. Monitorizar o socket do antecessor (se existir)
+        if (node.prev_fd != -1) {
+            FD_SET(node.prev_fd, &rfds);
+            if (node.prev_fd > max_fd) max_fd = node.prev_fd;
+        }
+
+        // 4. Monitorizar o socket do sucessor (se existir)
+        if (node.next_fd != -1) {
+            FD_SET(node.next_fd, &rfds);
+            if (node.next_fd > max_fd) max_fd = node.next_fd;
         }
         
         int activity = select(max_fd + 1, &rfds, NULL, NULL, NULL);
@@ -154,13 +169,12 @@ int main(int argc, char *argv[]) {
         // ==========================================
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             char buffer[BUFFER_SIZE];
-            char arg_net[4], arg_id[20];
+            char arg_net[20], arg_id[20]; // Mantido com tamanho 20 para o IP do comando direct
 
             if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) break;
 
-            buffer[strcspn(buffer, "\n")] = 0; //aquele shenanigan do lab 1 para tirar o \n
+            buffer[strcspn(buffer, "\n")] = 0; // remover o \n
 
-            printf("> "); fflush(stdout);
             printf("Li o comando: %s \n", buffer);
 
             int cmd_type = parse_user_command(buffer, arg_net, arg_id);
@@ -174,9 +188,7 @@ int main(int argc, char *argv[]) {
                             strcpy(node.net, arg_net);
                             strcpy(node.id, arg_id);
                             node.is_joined = 1;
-                            printf("Entrada na rede %s concluida.\n", node.net);
-
-                            //printf("Estado atual: %s%s\n", node.is_joined ? "Registado" : "Não registado", node.is_joined ? node.net : "");
+                            // Frase apagada!
                         }
                     }
                     break;
@@ -187,9 +199,7 @@ int main(int argc, char *argv[]) {
                     } else {
                         if (unregister_node(regIP, regUDP, node.net, node.id) == 0) {
                             node.is_joined = 0;
-                            printf("Saída da rede %s concluída.\n", node.net);
-
-                            //printf("Estado atual: %s%s\n", node.is_joined ? "Registado" : "Não registado", node.is_joined ? node.net : "");
+                            // Frase apagada!
                         }
                     }
                     break;
@@ -210,6 +220,7 @@ int main(int argc, char *argv[]) {
                         printf("Erro: Indica a rede ou regista-te primeiro (uso: n <net>).\n");
                     }
                     break;
+                    
                 case 5: // DIRECT (d)
                     if (node.next_fd != -1) {
                         printf("Erro: Já tens uma ligação de saída (next_fd = %d).\n", node.next_fd);
@@ -225,9 +236,48 @@ int main(int argc, char *argv[]) {
                     break;
 
                 default:
-                    // Comandos desconhecidos (tratado no interface.c)
+                    // Comandos desconhecidos
                     break;
             }
+            printf("> "); fflush(stdout);
+        }
+
+        // ==========================================
+        // C. TRATAR MENSAGENS DO ANTECESSOR (prev_fd)
+        // ==========================================
+        if (node.prev_fd != -1 && FD_ISSET(node.prev_fd, &rfds)) {
+            char buffer[BUFFER_SIZE];
+            ssize_t n = read(node.prev_fd, buffer, sizeof(buffer) - 1);
+            
+            if (n <= 0) {
+                // Se read() devolve 0 ou erro, a ligação caiu
+                printf("\n[Aviso] O nó antecessor desligou-se.\n> ");
+                close(node.prev_fd);
+                node.prev_fd = -1;
+            } else {
+                buffer[n] = '\0';
+                printf("\n[Mensagem Recebida do Antecessor]: %s\n> ", buffer);
+            }
+            fflush(stdout);
+        }
+
+        // ==========================================
+        // D. TRATAR MENSAGENS DO SUCESSOR (next_fd)
+        // ==========================================
+        if (node.next_fd != -1 && FD_ISSET(node.next_fd, &rfds)) {
+            char buffer[BUFFER_SIZE];
+            ssize_t n = read(node.next_fd, buffer, sizeof(buffer) - 1);
+            
+            if (n <= 0) {
+                // Se read() devolve 0 ou erro, a ligação caiu
+                printf("\n[Aviso] O nó sucessor desligou-se.\n> ");
+                close(node.next_fd);
+                node.next_fd = -1;
+            } else {
+                buffer[n] = '\0';
+                printf("\n[Mensagem Recebida do Sucessor]: %s\n> ", buffer);
+            }
+            fflush(stdout);
         }
     }
 
