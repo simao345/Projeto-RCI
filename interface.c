@@ -63,6 +63,18 @@ int parse_user_command(char *buffer, char *net, char *id) {
         id[0] = '\0';
         return 6;
     }
+    // SHOW NEIGHBOURS
+    else if (strcmp(cmd, "sg") == 0 || (strcmp(cmd, "show") == 0 && strcmp(net, "neighbours") == 0)) {
+        return 7; 
+    }
+    // REMOVE EDGE (re)
+    else if (strcmp(cmd, "re") == 0) {
+        return 8; 
+    }
+    // REMOVE EDGE (Escrito por extenso, com espaço)
+    else if (strcmp(cmd, "remove") == 0 && strcmp(net, "edge") == 0) {
+        return 8;
+    }
     
     printf("Comando desconhecido: %s\n", cmd);
     return 0;

@@ -24,7 +24,9 @@ typedef struct {
     int myTCP;
     int is_joined;
     int prev_fd; // Socket de quem se ligou a mim (antecessor no anel)
+    char prev_id[4]; // ID do nó antecessor
     int next_fd; // Socket a quem eu me liguei (sucessor no anel)
+    char next_id[4]; // ID do nó sucessor
 } NodeState;
 
 // globais
@@ -65,7 +67,9 @@ int main(int argc, char *argv[]) {
     memset(&node, 0, sizeof(node));
     node.is_joined = 0;
     node.prev_fd = -1;
+    node.prev_id[0] = '\0';
     node.next_fd = -1;
+    node.next_id[0] = '\0';
 
     // Guardar contactos locais
     strcpy(node.myIP, argv[1]);
@@ -254,11 +258,52 @@ int main(int argc, char *argv[]) {
                             
                             if (fd != -1) {
                                 node.next_fd = fd;
+                                strcpy(node.next_id, arg_net);
+
                                 printf("[TCP] Ligação P2P estabelecida com sucesso com o Nó %s! (next_fd = %d)\n", arg_net, fd);
+
+                                char msg[64];
+                                sprintf(msg, "NEIGHBOR %s\n", node.id);
+                                write(node.next_fd, msg, strlen(msg)); // Envia para o tubo
+                                printf("Enviado no TCP: %s", msg);
                             }
                         } else {
                             printf("-> Erro: Nó %s não encontrado na rede %s.\n", arg_net, node.net);
                         }
+                    }
+                    break;
+
+               case 7: // SHOW NEIGHBOURS (sg)
+                    printf("--- Vizinhos do Nó %s ---\n", node.id);
+                    
+                    if (node.next_fd != -1) {
+                        printf("-> Vizinho Seguinte: Nó %s (fd %d)\n", node.next_id, node.next_fd);
+                    } else {
+                        printf("-> Sem Vizinho Seguinte\n");
+                    }
+                    
+                    if (node.prev_fd != -1) {
+                        printf("<- Vizinho Anterior: Nó %s (fd %d)\n", node.prev_id, node.prev_fd);
+                    } else {
+                        printf("<- Sem Vizinho Anterior\n");
+                    }
+                    printf("--------------------------\n");
+                    break;
+
+                case 8: // REMOVE EDGE (re / remove edge)
+                    if (node.next_fd != -1) {
+                        printf("-> A fechar a ligação P2P de saída com o Nó %s (fd %d)...\n", node.next_id, node.next_fd);
+                        
+                        // 1. Fechar o socket TCP
+                        close(node.next_fd);
+                        
+                        // 2. Limpar o estado do nó (FD e ID)
+                        node.next_fd = -1;
+                        node.next_id[0] = '\0'; // <--- NOVO: Limpar o ID do vizinho!
+                        
+                        printf("[TCP] Ligação com o vizinho seguinte fechada com sucesso.\n");
+                    } else {
+                        printf("Erro: Não tens nenhuma ligação de saída (vizinho seguinte) ativa para remover.\n");
                     }
                     break;
 
@@ -273,19 +318,34 @@ int main(int argc, char *argv[]) {
         // C. TRATAR MENSAGENS DO ANTECESSOR (prev_fd)
         // ==========================================
         if (node.prev_fd != -1 && FD_ISSET(node.prev_fd, &rfds)) {
-            char buffer[BUFFER_SIZE];
+            char buffer[256];
             ssize_t n = read(node.prev_fd, buffer, sizeof(buffer) - 1);
             
             if (n <= 0) {
-                // Se read() devolve 0 ou erro, a ligação caiu
-                printf("\n[Aviso] O nó antecessor desligou-se.\n> ");
+                // Se read retornar 0 ou menos, a ligação caiu
+                printf("[Aviso] O vizinho anterior fechou a ligação.\n");
                 close(node.prev_fd);
                 node.prev_fd = -1;
+                node.prev_id[0] = '\0'; // Limpar o ID do vizinho anterior
             } else {
-                buffer[n] = '\0';
-                printf("\n[Mensagem Recebida do Antecessor]: %s\n> ", buffer);
+                // Recebemos uma mensagem de texto!
+                buffer[n] = '\0'; // Garantir que é uma string válida
+                
+                char cmd[32], id_recebido[16];
+                
+                // Extrair o comando e o ID da mensagem (ex: "NEIGHBOR 10")
+                if (sscanf(buffer, "%s %s", cmd, id_recebido) == 2) {
+                    if (strcmp(cmd, "NEIGHBOR") == 0) {
+
+                        strcpy(node.prev_id, id_recebido);
+                        printf("Recebido no TCP: %s", buffer); // O buffer já deve trazer o \n
+                        printf("-> O Nó %s apresentou-se como meu novo vizinho anterior!\n", id_recebido);
+                        
+                        // Dica de Mestre: Se tiveres uma variável tipo 'node.prev_id' na tua struct, 
+                        // é aqui que deves fazer: strcpy(node.prev_id, id_recebido);
+                    }
+                }
             }
-            fflush(stdout);
         }
 
         // ==========================================
