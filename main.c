@@ -235,6 +235,33 @@ int main(int argc, char *argv[]) {
                     }
                     break;
 
+                case 6: // ADD EDGE (ae <id> ou add edge <id>)
+                    if (!node.is_joined) {
+                        printf("Erro: O nó não está registado em nenhuma rede.\n");
+                    } else if (node.next_fd != -1) {
+                        printf("Erro: Já tens uma ligação de saída ativa.\n");
+                    } else {
+                        char target_ip[16];
+                        int target_tcp;
+                        
+                        // NOTA: O nosso interface.c guardou o ID do vizinho na variável 'arg_net'
+                        // 1. Perguntar ao servidor UDP quem é este nó
+                        if (get_node_contact(regIP, regUDP, node.net, arg_net, target_ip, &target_tcp) == 0) {
+                            printf("-> Contacto obtido! A ligar ao Nó %s (%s:%d)...\n", arg_net, target_ip, target_tcp);
+                            
+                            // 2. Usar os dados recebidos para estabelecer o TCP
+                            int fd = setup_tcp_client(target_ip, target_tcp);
+                            
+                            if (fd != -1) {
+                                node.next_fd = fd;
+                                printf("[TCP] Ligação P2P estabelecida com sucesso com o Nó %s! (next_fd = %d)\n", arg_net, fd);
+                            }
+                        } else {
+                            printf("-> Erro: Nó %s não encontrado na rede %s.\n", arg_net, node.net);
+                        }
+                    }
+                    break;
+
                 default:
                     // Comandos desconhecidos
                     break;
