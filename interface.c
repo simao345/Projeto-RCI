@@ -75,6 +75,18 @@ int parse_user_command(char *buffer, char *net, char *id) {
     else if (strcmp(cmd, "remove") == 0 && strcmp(net, "edge") == 0) {
         return 8;
     }
+    // ANNOUNCE (a id)
+    else if (strcmp(cmd, "a") == 0 || strcmp(cmd, "announce") == 0) {
+        if (num < 2) {
+            printf("Erro: uso correto: a id\n");
+            return 0;
+        }
+        return 9; 
+    }
+    // SHOW ROUTING (sr)
+    else if (strcmp(cmd, "sr") == 0 || (strcmp(cmd, "show") == 0 && strcmp(net, "routing") == 0)) {
+        return 10;
+    }
     
     printf("Comando desconhecido: %s\n", cmd);
     return 0;
