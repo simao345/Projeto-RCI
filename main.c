@@ -16,7 +16,7 @@
 
  #define BUFFER_SIZE 256 
 
- // --- Estrutura para a Tabela de Routing ---
+ // Estrutura para a Tabela de Routing
  typedef struct {
      char dest[4];     
      int neighbor_fd;  
@@ -34,7 +34,7 @@
      int next_fd; 
      char next_id[4];
      int monitoring;
-
+     // ADIÇÃO: Tabela de Routing
      Route routing_table[100];
      int route_count;
  } NodeState; 
@@ -75,7 +75,7 @@
      if (argc < 3 || argc > 5) { 
          fprintf(stderr, "Erro de invocação.\nUso correto: %s IP TCP [regIP] [regUDP]\n", argv[0]); 
          exit(1); 
-     } //add else if
+     } 
 
      if (inet_pton(AF_INET, argv[1], &(struct in_addr){0}) != 1) { 
          fprintf(stderr, "Erro: IP do nó inválido.\n"); 
@@ -183,8 +183,8 @@
                                  node.next_fd = fd; strcpy(node.next_id, arg_net); 
                                  char msg[64]; sprintf(msg, "NEIGHBOR %s\n", node.id); 
                                  write(node.next_fd, msg, strlen(msg)); 
-                                 add_route(arg_net, node.next_fd); //remover
-                             } 
+                                 add_route(arg_net, node.next_fd); //aaaa
+                             }
                          } 
                      } 
                      break; 
