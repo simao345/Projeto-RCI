@@ -32,7 +32,8 @@
      int prev_fd; 
      char prev_id[4]; 
      int next_fd; 
-     char next_id[4]; 
+     char next_id[4];
+     int monitoring;
      // ADIÇÃO: Tabela de Routing
      Route routing_table[100];
      int route_count;
@@ -85,7 +86,8 @@
      node.is_joined = 0; 
      node.prev_fd = -1; 
      node.next_fd = -1; 
-     node.route_count = 0; 
+     node.route_count = 0;
+     node.monitoring = 0;
 
      strcpy(node.myIP, argv[1]); 
      node.myTCP = atoi(argv[2]); 
@@ -209,18 +211,34 @@
                      for (int i = 0; i < node.route_count; i++) { 
                          printf("Destino: %s | Via FD: %d\n", node.routing_table[i].dest, node.routing_table[i].neighbor_fd); 
                      } 
-                     break; 
+                     break;
+                case 11: // start monitor (sm)
+                    node.monitoring = 1;
+                    printf("Monitorização ativada.\n");
+                    break;
+                case 12: // end monitor (em)
+                    node.monitoring = 0;
+                    printf("Monitorização desativada.\n");
+                    break;
              } 
              printf("> "); fflush(stdout); 
          } 
 
          // RECEBER DO ANTECESSOR (prev_fd) 
          if (node.prev_fd != -1 && FD_ISSET(node.prev_fd, &rfds)) { 
-             char buffer[256]; ssize_t n = read(node.prev_fd, buffer, sizeof(buffer) - 1); 
+             char buffer[256];
+             ssize_t n = read(node.prev_fd, buffer, sizeof(buffer) - 1); 
+             
              if (n <= 0) { 
                  close(node.prev_fd); node.prev_fd = -1; node.prev_id[0] = '\0'; 
-             } else { 
-                 buffer[n] = '\0'; 
+             } else {
+                
+                 buffer[n] = '\0';
+                 
+                 if (node.monitoring) {
+                     printf("[MONITOR] Recebido do antecessor: %s", buffer);
+                 }
+
                  char cmd[32], id_rec[16]; 
                  if (sscanf(buffer, "%s %s", cmd, id_rec) == 2) { 
                      if (strcmp(cmd, "NEIGHBOR") == 0) { 
@@ -236,11 +254,18 @@
 
          // RECEBER DO SUCESSOR (next_fd) 
          if (node.next_fd != -1 && FD_ISSET(node.next_fd, &rfds)) { 
-             char buffer[BUFFER_SIZE]; ssize_t n = read(node.next_fd, buffer, sizeof(buffer) - 1); 
+             char buffer[BUFFER_SIZE];
+             ssize_t n = read(node.next_fd, buffer, sizeof(buffer) - 1); 
+             
              if (n <= 0) { 
                  close(node.next_fd); node.next_fd = -1; node.next_id[0] = '\0'; 
              } else { 
-                 buffer[n] = '\0'; 
+                 buffer[n] = '\0';
+                 
+                 if (node.monitoring) {
+                     printf("[MONITOR] Recebido do sucessor: %s", buffer);
+                 }
+                 
                  char cmd[32], id_rec[16]; 
                  if (sscanf(buffer, "%s %s", cmd, id_rec) == 2) { 
                      if (strcmp(cmd, "ROUTING") == 0) { 

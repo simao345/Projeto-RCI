@@ -87,6 +87,14 @@ int parse_user_command(char *buffer, char *net, char *id) {
     else if (strcmp(cmd, "sr") == 0 || (strcmp(cmd, "show") == 0 && strcmp(net, "routing") == 0)) {
         return 10;
     }
+    // START MONITOR (sm)
+    else if (strcmp(cmd, "sm") == 0 || (strcmp(cmd, "start") == 0 && strcmp(net, "monitor") == 0)) {
+        return 11;
+    }
+    // END MONITOR (em)
+    else if (strcmp(cmd, "em") == 0 || (strcmp(cmd, "end") == 0 && strcmp(net, "monitor") == 0)) {
+        return 12;
+    }
     
     printf("Comando desconhecido: %s\n", cmd);
     return 0;
