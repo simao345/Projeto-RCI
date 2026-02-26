@@ -43,6 +43,38 @@ int parse_user_command(char *buffer, char *net, char *id) {
         }
         return 5; // Retornamos 5 para o main saber que é o comando direct
     }
+    // ADD EDGE (CONTACT / LIGAÇÃO AUTOMÁTICA)
+    else if (strcmp(cmd, "ae") == 0) {
+        if (num < 2) {
+            printf("Erro: uso correto: ae id\n");
+            return 0;
+        }
+        return 6; 
+    }
+    // ADD EDGE (Escrito por extenso, com espaço)
+    else if (strcmp(cmd, "add") == 0 && strcmp(net, "edge") == 0) {
+        if (num < 3) {
+            printf("Erro: uso correto: add edge id\n");
+            return 0;
+        }
+        // Como o sscanf partiu nos espaços, o ID ficou guardado no argumento 'id'.
+        // Vamos copiá-lo para o 'net' para o main.c o encontrar no mesmo sítio do 'ae'.
+        strcpy(net, id);
+        id[0] = '\0';
+        return 6;
+    }
+    // SHOW NEIGHBOURS
+    else if (strcmp(cmd, "sg") == 0 || (strcmp(cmd, "show") == 0 && strcmp(net, "neighbours") == 0)) {
+        return 7; 
+    }
+    // REMOVE EDGE (re)
+    else if (strcmp(cmd, "re") == 0) {
+        return 8; 
+    }
+    // REMOVE EDGE (Escrito por extenso, com espaço)
+    else if (strcmp(cmd, "remove") == 0 && strcmp(net, "edge") == 0) {
+        return 8;
+    }
     
     printf("Comando desconhecido: %s\n", cmd);
     return 0;
