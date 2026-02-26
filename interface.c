@@ -95,6 +95,14 @@ int parse_user_command(char *buffer, char *net, char *id) {
     else if (strcmp(cmd, "em") == 0 || (strcmp(cmd, "end") == 0 && strcmp(net, "monitor") == 0)) {
         return 12;
     }
+    // MESSAGE (m dest mensagem)
+    else if (strcmp(cmd, "message") == 0 || strcmp(cmd, "m") == 0) {
+        if (sscanf(buffer, "%*s %s %[^\n]", net, id) < 2) {
+            printf("Erro: uso correto: m dest mensagem\n");
+            return 0;
+        }
+        return 13; 
+    }
     
     printf("Comando desconhecido: %s\n", cmd);
     return 0;

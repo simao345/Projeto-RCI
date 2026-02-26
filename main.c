@@ -220,6 +220,30 @@
                     node.monitoring = 0;
                     printf("Monitorização desativada.\n");
                     break;
+                case 13: // message (m) <dest> <msg>
+                    {
+                        int found_fd = -1;
+                        // 1. Procurar na tabela de routing qual o vizinho para chegar ao destino
+                        for (int i = 0; i < node.route_count; i++) {
+                            if (strcmp(node.routing_table[i].dest, arg_net) == 0) { // arg_net tem o <dest>
+                                found_fd = node.routing_table[i].neighbor_fd;
+                                break;
+                            }
+                        }
+
+                        if (found_fd != -1) {
+                            char chat_msg[512];
+                            // Protocolo: CHAT <origem> <destino> <mensagem>
+                            sprintf(chat_msg, "CHAT %s %s %s\n", node.id, arg_net, arg_id); // arg_id tem o texto
+                            write(found_fd, chat_msg, strlen(chat_msg));
+                            printf("Mensagem enviada para %s via FD %d.\n", arg_net, found_fd);
+                        } else {
+                            printf("Erro: Destino %s não encontrado na tabela de routing.\n", arg_net);
+                        }
+                    }
+                    break;
+                 default:
+                     printf("Comando desconhecido ou formato inválido.\n");
              } 
              printf("> "); fflush(stdout); 
          } 
@@ -232,23 +256,48 @@
              if (n <= 0) { 
                  close(node.prev_fd); node.prev_fd = -1; node.prev_id[0] = '\0'; 
              } else {
-                
                  buffer[n] = '\0';
-                 
                  if (node.monitoring) {
                      printf("[MONITOR] Recebido do antecessor: %s", buffer);
                  }
 
-                 char cmd[32], id_rec[16]; 
-                 if (sscanf(buffer, "%s %s", cmd, id_rec) == 2) { 
-                     if (strcmp(cmd, "NEIGHBOR") == 0) { 
-                         strcpy(node.prev_id, id_rec); add_route(id_rec, node.prev_fd); 
-                         printf("-> O Nó %s apresentou-se!\n", id_rec); 
-                     } else if (strcmp(cmd, "ROUTING") == 0) { 
-                         add_route(id_rec, node.prev_fd); 
-                         if (node.next_fd != -1) write(node.next_fd, buffer, strlen(buffer)); 
-                     } 
-                 } 
+                 char cmd[32]; 
+                 sscanf(buffer, "%s", cmd); 
+
+                 if (strcmp(cmd, "NEIGHBOR") == 0) { 
+                     char id_rec[16];
+                     if (sscanf(buffer, "%*s %s", id_rec) == 1) {
+                        strcpy(node.prev_id, id_rec); add_route(id_rec, node.prev_fd); 
+                        printf("-> O Nó %s apresentou-se!\n", id_rec); 
+                     }
+                 } else if (strcmp(cmd, "ROUTING") == 0) { 
+                     char id_rec[16];
+                     if (sscanf(buffer, "%*s %s", id_rec) == 1) {
+                        add_route(id_rec, node.prev_fd); 
+                        if (node.next_fd != -1) write(node.next_fd, buffer, strlen(buffer)); 
+                     }
+                 }
+                 else if (strcmp(cmd, "CHAT") == 0) {
+                     char origem[4], destino[4], texto[256];
+                     sscanf(buffer, "%*s %s %s %[^\n]", origem, destino, texto);
+
+                     if (strcmp(destino, node.id) == 0) {
+                         printf("\n[CHAT] De %s: %s\n> ", origem, texto);
+                         fflush(stdout);
+                     } else {
+                         int route_fd = -1;
+                         for (int i = 0; i < node.route_count; i++) {
+                             if (strcmp(node.routing_table[i].dest, destino) == 0) {
+                                 route_fd = node.routing_table[i].neighbor_fd;
+                                 break;
+                             }
+                         }
+                         if (route_fd != -1) {
+                             write(route_fd, buffer, strlen(buffer));
+                             if (node.monitoring) printf("[MONITOR] Reencaminhando CHAT para %s\n", destino);
+                         }
+                     }
+                 }
              } 
          } 
 
@@ -261,18 +310,41 @@
                  close(node.next_fd); node.next_fd = -1; node.next_id[0] = '\0'; 
              } else { 
                  buffer[n] = '\0';
-                 
                  if (node.monitoring) {
                      printf("[MONITOR] Recebido do sucessor: %s", buffer);
                  }
                  
-                 char cmd[32], id_rec[16]; 
-                 if (sscanf(buffer, "%s %s", cmd, id_rec) == 2) { 
-                     if (strcmp(cmd, "ROUTING") == 0) { 
-                         add_route(id_rec, node.next_fd); 
-                         if (node.prev_fd != -1) write(node.prev_fd, buffer, strlen(buffer)); 
-                     } 
-                 } 
+                 char cmd[32]; 
+                 sscanf(buffer, "%s", cmd);
+
+                 if (strcmp(cmd, "ROUTING") == 0) { 
+                     char id_rec[16];
+                     if (sscanf(buffer, "%*s %s", id_rec) == 1) {
+                        add_route(id_rec, node.next_fd); 
+                        if (node.prev_fd != -1) write(node.prev_fd, buffer, strlen(buffer)); 
+                     }
+                 }
+                 else if (strcmp(cmd, "CHAT") == 0) {
+                     char origem[4], destino[4], texto[256];
+                     sscanf(buffer, "%*s %s %s %[^\n]", origem, destino, texto);
+
+                     if (strcmp(destino, node.id) == 0) {
+                         printf("\n[CHAT] De %s: %s\n> ", origem, texto);
+                         fflush(stdout);
+                     } else {
+                         int route_fd = -1;
+                         for (int i = 0; i < node.route_count; i++) {
+                             if (strcmp(node.routing_table[i].dest, destino) == 0) {
+                                 route_fd = node.routing_table[i].neighbor_fd;
+                                 break;
+                             }
+                         }
+                         if (route_fd != -1) {
+                             write(route_fd, buffer, strlen(buffer));
+                             if (node.monitoring) printf("[MONITOR] Reencaminhando CHAT para %s\n", destino);
+                         }
+                     }
+                 }
              } 
          } 
      } 
