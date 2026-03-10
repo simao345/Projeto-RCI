@@ -224,27 +224,30 @@ int main(int argc, char *argv[]) {
 
             switch (cmd_type) {
                 case 1: // JOIN
-                     if (!node.is_joined && register_node(regIP, regUDP, arg_net, arg_id, node.myIP, node.myTCP) == 0) { 
-                         strcpy(node.net, arg_net); strcpy(node.id, arg_id); node.is_joined = 1; 
-                     } 
-                     break; 
-                 case 2: // LEAVE
-                     if (!node.is_joined) { 
-                         printf("O nó não está registado em nenhuma rede.\n"); 
-                     } else { 
-                         if (unregister_node(regIP, regUDP, node.net, node.id) == 0) { 
-                             node.is_joined = 0; 
-                         } 
-                     } 
-                     break; 
-                 case 3: // EXIT
-                     if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id); 
-                     exit(0); 
-                 case 4: // NODES
-                     if (strlen(arg_net) > 0) nodes_query(arg_net, regIP, regUDP); 
-                     else if (node.is_joined) nodes_query(node.net, regIP, regUDP); 
-                     else printf("Erro: Indica a rede ou regista-te primeiro.\n"); 
-                     break; 
+                    if (!node.is_joined && register_node(regIP, regUDP, arg_net, arg_id, node.myIP, node.myTCP) == 0) { 
+                        strcpy(node.net, arg_net);
+                        strcpy(node.id, arg_id);
+                        node.is_joined = 1;
+                        update_routing_table(node.id, 0, -1, FORWARDING);
+                    } 
+                    break; 
+                case 2: // LEAVE
+                    if (!node.is_joined) { 
+                        printf("O nó não está registado em nenhuma rede.\n"); 
+                    } else { 
+                        if (unregister_node(regIP, regUDP, node.net, node.id) == 0) { 
+                            node.is_joined = 0; 
+                        } 
+                    } 
+                    break; 
+                case 3: // EXIT
+                    if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id); 
+                    exit(0); 
+                case 4: // NODES
+                    if (strlen(arg_net) > 0) nodes_query(arg_net, regIP, regUDP); 
+                    else if (node.is_joined) nodes_query(node.net, regIP, regUDP); 
+                    else printf("Erro: Indica a rede ou regista-te primeiro.\n"); 
+                    break; 
                                                                                             /*case 5: // DIRECT
                                                                                                 if (node.next_fd != -1) printf("Erro: Já tens ligação de saída.\n"); 
                                                                                                 else { 
@@ -286,6 +289,7 @@ int main(int argc, char *argv[]) {
                     break; 
                 case 9: // ANNOUNCE (a)
                     if (node.is_joined) {
+                        update_routing_table(node.id, 0, -1, FORWARDING);
                         char route_msg[64];
                         // Um nó anuncia-se a si próprio com 0 saltos
                         sprintf(route_msg, "ROUTE %s 0\n", node.id); 
@@ -296,25 +300,30 @@ int main(int argc, char *argv[]) {
                         printf("Anúncio de rota (ROUTE %s 0) enviado aos vizinhos.\n", node.id);
                     }
                     break;
-                case 10: // SHOW ROUTING (sr) [dest]
-                    printf("\n--- ESTADO DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
-                    if (node.route_count == 0) {
-                        printf("Tabela vazia. Aguardando anúncios (ROUTE)...\n");
-                    } else {
-                        printf("%-10s %-12s %-10s %-10s\n", "DESTINO", "ESTADO", "DISTÂNCIA", "VIZINHO (FD)");
-                        for (int i = 0; i < node.route_count; i++) {
-                            // Se o utilizador pediu um destino específico, filtramos
-                            if (strlen(arg_net) > 0 && strcmp(node.routing_table[i].dest, arg_net) != 0) 
-                                continue;
+                case 10: // SHOW ROUTING (sr)
+                    printf("\n--- TABELA DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
+                    // Cabeçalho ajustado para maior clareza
+                    printf("%-10s %-12s %-10s %-10s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
+                    
+                    for (int i = 0; i < node.route_count; i++) {
+                        char *state_str = (node.routing_table[i].state == FORWARDING) ? "EXPEDIÇÃO" : "COORDENAÇÃO";
+                        
+                        // 1. Imprimir Destino e Estado
+                        printf("%-10s %-12s ", 
+                            node.routing_table[i].dest, 
+                            state_str);
 
-                            char *state_str = (node.routing_table[i].state == FORWARDING) ? "EXPEDIÇÃO" : "COORDENAÇÃO";
-                            printf("%-10s %-12s %-10d %-10d\n", 
-                                node.routing_table[i].dest, 
-                                state_str, 
-                                node.routing_table[i].distance, 
-                                node.routing_table[i].neighbor_fd);
+                        // 2. Imprimir a variável distance (n de saltos)
+                        printf("%-10d ", node.routing_table[i].distance);
+
+                        // 3. Imprimir o Vizinho (FD)
+                        if (node.routing_table[i].neighbor_fd == -1) {
+                            printf("%-10s\n", "local");
+                        } else {
+                            printf("%-10d\n", node.routing_table[i].neighbor_fd);
                         }
                     }
+                    printf("\n");
                     break;
                 case 11: // start monitor (sm)
                     node.monitoring = 1;
