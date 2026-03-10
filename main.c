@@ -16,9 +16,12 @@
 #define BUFFER_SIZE 256 
 #define MAX_NEIGHBORS 10
 
+typedef enum { FORWARDING, COORDINATION } RouteState;
 typedef struct {
     char dest[4];     
-    int neighbor_fd;  
+    int neighbor_fd;
+    int distance; // n saltos para o destino
+    RouteState state;
 } Route;
 
 // Nova estrutura para vizinhos no array
@@ -79,20 +82,85 @@ void clean_routing_table_by_fd(int fd) {
 
 void remove_neighbor_by_index(int index) {
     int fd_to_close = node.neighbors[index].fd;
-    printf("A fechar ligação com Nó %s (fd %d)...\n", node.neighbors[index].id, fd_to_close);
-    close(fd_to_close);
-    clean_routing_table_by_fd(fd_to_close);
+    char lost_neighbor_id[4];
+    strcpy(lost_neighbor_id, node.neighbors[index].id);
 
+    printf("\n[SISTEMA] Ligação perdida com Nó %s (fd %d).\n", lost_neighbor_id, fd_to_close);
+
+    // 1. Identificar rotas que dependiam deste vizinho
+    for (int i = 0; i < node.route_count; i++) {
+        if (node.routing_table[i].neighbor_fd == fd_to_close) {
+            // Entramos em estado de COORDENAÇÃO para este destino
+            node.routing_table[i].state = COORDINATION;
+            
+            // 2. Avisar todos os OUTROS vizinhos da perda
+            char coord_msg[64];
+            sprintf(coord_msg, "COORD %s\n", node.routing_table[i].dest);
+            
+            for (int j = 0; j < node.neighbor_count; j++) {
+                if (node.neighbors[j].fd != fd_to_close) {
+                    write(node.neighbors[j].fd, coord_msg, strlen(coord_msg));
+                }
+            }
+        }
+    }
+
+    // 3. Fechar socket e limpar array de vizinhos
+    close(fd_to_close);
     for (int i = index; i < node.neighbor_count - 1; i++) {
         node.neighbors[i] = node.neighbors[i + 1];
     }
     node.neighbor_count--;
+    printf("> "); fflush(stdout);
 }
 
 void sigint_handler(int sig) { 
     if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id); 
     exit(0); 
-} 
+}
+
+void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state) {
+    for (int i = 0; i < node.route_count; i++) {
+        if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
+            // Se encontrarmos um caminho novo (mesmo que mais longo) enquanto estamos em COORD,
+            // ou um caminho mais curto enquanto em FORWARDING:
+            if (node.routing_table[i].state == COORDINATION || new_dist < node.routing_table[i].distance) {
+                node.routing_table[i].distance = new_dist;
+                node.routing_table[i].neighbor_fd = fd;
+                node.routing_table[i].state = state; // Volta a FORWARDING
+                if (node.monitoring) printf("[SISTEMA] Rota para %s recuperada via FD %d.\n", dest_id, fd);
+            }
+            return;
+        }
+    }
+    // Se não existir e houver espaço, adicionar novo destino
+    if (node.route_count < 100) {
+        strcpy(node.routing_table[node.route_count].dest, dest_id);
+        node.routing_table[node.route_count].distance = new_dist;
+        node.routing_table[node.route_count].neighbor_fd = fd;
+        node.routing_table[node.route_count].state = state;
+        node.route_count++;
+    }
+}
+
+void update_route_state(char *dest_id, RouteState new_state) {
+    for (int i = 0; i < node.route_count; i++) {
+        if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
+            node.routing_table[i].state = new_state;
+            return;
+        }
+    }
+}
+
+void handle_uncoord(char *dest_id, int fd) {
+    for (int i = 0; i < node.route_count; i++) {
+        // Se recebo UNCOORD de quem eu dependia, a rota torna-se inválida ou entra em coordenação
+        if (strcmp(node.routing_table[i].dest, dest_id) == 0 && node.routing_table[i].neighbor_fd == fd) {
+            node.routing_table[i].state = COORDINATION;
+            // Nota: Em implementações mais avançadas, aqui poderias remover a rota para forçar nova descoberta
+        }
+    }
+}
 
 // --- MAIN ---
 
@@ -195,7 +263,6 @@ int main(int argc, char *argv[]) {
                                 node.neighbor_count++;
                                 char msg[64]; sprintf(msg, "NEIGHBOR %s\n", node.id); 
                                 write(fd, msg, strlen(msg)); 
-                                add_route(arg_net, fd);
                             }
                         } 
                     } 
@@ -217,18 +284,37 @@ int main(int argc, char *argv[]) {
                         if(!found) printf("Erro: Nó %s não é teu vizinho.\n", arg_net);
                     }
                     break; 
-                case 9: // ANNOUNCE
-                    for(int i=0; i < node.neighbor_count; i++) {
-                        char route_msg[64]; sprintf(route_msg, "ROUTING %s\n", node.id);
-                        write(node.neighbors[i].fd, route_msg, strlen(route_msg));
+                case 9: // ANNOUNCE (a)
+                    if (node.is_joined) {
+                        char route_msg[64];
+                        // Um nó anuncia-se a si próprio com 0 saltos
+                        sprintf(route_msg, "ROUTE %s 0\n", node.id); 
+                        
+                        for (int i = 0; i < node.neighbor_count; i++) {
+                            write(node.neighbors[i].fd, route_msg, strlen(route_msg));
+                        }
+                        printf("Anúncio de rota (ROUTE %s 0) enviado aos vizinhos.\n", node.id);
                     }
-                    printf("Anúncio enviado a todos os vizinhos.\n");
                     break;
-                case 10: // SHOW ROUTING
-                    printf("--- Tabela de Encaminhamento (Nó %s) ---\n", node.id); 
-                    for (int i = 0; i < node.route_count; i++) { 
-                        printf("Destino: %s | Via FD: %d\n", node.routing_table[i].dest, node.routing_table[i].neighbor_fd); 
-                    } 
+                case 10: // SHOW ROUTING (sr) [dest]
+                    printf("\n--- ESTADO DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
+                    if (node.route_count == 0) {
+                        printf("Tabela vazia. Aguardando anúncios (ROUTE)...\n");
+                    } else {
+                        printf("%-10s %-12s %-10s %-10s\n", "DESTINO", "ESTADO", "DISTÂNCIA", "VIZINHO (FD)");
+                        for (int i = 0; i < node.route_count; i++) {
+                            // Se o utilizador pediu um destino específico, filtramos
+                            if (strlen(arg_net) > 0 && strcmp(node.routing_table[i].dest, arg_net) != 0) 
+                                continue;
+
+                            char *state_str = (node.routing_table[i].state == FORWARDING) ? "EXPEDIÇÃO" : "COORDENAÇÃO";
+                            printf("%-10s %-12s %-10d %-10d\n", 
+                                node.routing_table[i].dest, 
+                                state_str, 
+                                node.routing_table[i].distance, 
+                                node.routing_table[i].neighbor_fd);
+                        }
+                    }
                     break;
                 case 11: // start monitor (sm)
                     node.monitoring = 1;
@@ -267,38 +353,64 @@ int main(int argc, char *argv[]) {
 
                 if (n <= 0) {
                     remove_neighbor_by_index(i);
-                    i--; // Ajustar índice por causa do shift
+                    i--; 
                 } else {
                     buffer[n] = '\0';
                     if (node.monitoring) printf("[MONITOR] FD %d: %s", current_fd, buffer);
 
                     char cmd[32]; sscanf(buffer, "%s", cmd);
 
+                    // 1. Identificação Inicial (Apenas guarda o ID, sem criar rota)
                     if (strcmp(cmd, "NEIGHBOR") == 0) {
                         sscanf(buffer, "%*s %s", node.neighbors[i].id);
-                        add_route(node.neighbors[i].id, current_fd);
                         printf("\n[TCP] Vizinho no fd %d identificou-se como Nó %s.\n> ", current_fd, node.neighbors[i].id);
                         fflush(stdout);
-                    } else if (strcmp(cmd, "ROUTING") == 0) {
-                        char id_rec[16];
-                        if (sscanf(buffer, "%*s %s", id_rec) == 1) {
-                            add_route(id_rec, current_fd); // current_fd é o FD de quem enviou o anúncio
-                            // Propaga para TODOS os outros vizinhos no array
+                    } 
+                    
+                    // 2. Protocolo de Encaminhamento: ROUTE dest n
+                    else if (strcmp(cmd, "ROUTE") == 0) {
+                        char dest_id[4];
+                        int dist;
+                        if (sscanf(buffer, "%*s %s %d", dest_id, &dist) == 2) {
+                            // Adiciona ou atualiza a rota com estado FORWARDING e distância +1
+                            update_routing_table(dest_id, dist + 1, current_fd, FORWARDING);
+                            
+                            // Propaga o anúncio para os restantes vizinhos
                             for(int j=0; j < node.neighbor_count; j++) {
                                 if(node.neighbors[j].fd != current_fd) {
-                                    write(node.neighbors[j].fd, buffer, strlen(buffer));
+                                    write(node.neighbors[j].fd, buffer, n);
                                 }
                             }
                         }
-                    } else if (strcmp(cmd, "CHAT") == 0) {
+                    }
+
+                    // 3. Protocolo de Encaminhamento: COORD dest
+                    else if (strcmp(cmd, "COORD") == 0) {
+                        char dest_id[4];
+                        if (sscanf(buffer, "%*s %s", dest_id) == 1) {
+                            update_route_state(dest_id, COORDINATION); // Muda estado para coordenação
+                        }
+                    }
+
+                    // 4. Protocolo de Encaminhamento: UNCOORD dest
+                    else if (strcmp(cmd, "UNCOORD") == 0) {
+                        char dest_id[4];
+                        if (sscanf(buffer, "%*s %s", dest_id) == 1) {
+                            // Lógica para remover a dependência deste vizinho para o destino
+                            handle_uncoord(dest_id, current_fd);
+                        }
+                    }
+
+                    // 5. Mensagens de Chat
+                    else if (strcmp(cmd, "CHAT") == 0) {
                         char origem[4], destino[4], texto[512];
                         sscanf(buffer, "%*s %s %s %[^\n]", origem, destino, texto);
                         if (strcmp(destino, node.id) == 0) {
                             printf("\n[CHAT] De %s: %s\n> ", origem, texto); fflush(stdout);
                         } else {
-                            // Reencaminhar usando a tabela
+                            // Reencaminha apenas se o estado for FORWARDING
                             for(int j=0; j<node.route_count; j++) {
-                                if(strcmp(node.routing_table[j].dest, destino) == 0) {
+                                if(strcmp(node.routing_table[j].dest, destino) == 0 && node.routing_table[j].state == FORWARDING) {
                                     write(node.routing_table[j].neighbor_fd, buffer, n);
                                     break;
                                 }
