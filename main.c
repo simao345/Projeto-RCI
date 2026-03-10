@@ -302,25 +302,23 @@ int main(int argc, char *argv[]) {
                     break;
                 case 10: // SHOW ROUTING (sr)
                     printf("\n--- TABELA DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
-                    // Cabeçalho ajustado para maior clareza
-                    printf("%-10s %-12s %-10s %-10s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
+                    // Aumentamos os espaços para garantir que nada se sobrepõe
+                    printf("%-10s %-13s %-10s %-12s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
+                    printf("---------- ------------- ---------- ------------\n");
                     
                     for (int i = 0; i < node.route_count; i++) {
                         char *state_str = (node.routing_table[i].state == FORWARDING) ? "EXPEDIÇÃO" : "COORDENAÇÃO";
                         
-                        // 1. Imprimir Destino e Estado
-                        printf("%-10s %-12s ", 
+                        // Usamos exatamente os mesmos números do cabeçalho (-10, -15, -10, -10)
+                        printf("%-10s %-15s %-10d ", 
                             node.routing_table[i].dest, 
-                            state_str);
+                            state_str, 
+                            node.routing_table[i].distance);
 
-                        // 2. Imprimir a variável distance (n de saltos)
-                        printf("%-10d ", node.routing_table[i].distance);
-
-                        // 3. Imprimir o Vizinho (FD)
                         if (node.routing_table[i].neighbor_fd == -1) {
-                            printf("%-10s\n", "local");
+                            printf("%-12s\n", "local");
                         } else {
-                            printf("%-10d\n", node.routing_table[i].neighbor_fd);
+                            printf("%-12d\n", node.routing_table[i].neighbor_fd);
                         }
                     }
                     printf("\n");
