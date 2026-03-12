@@ -11,40 +11,11 @@
 
 #include "interface.h" 
 #include "server_udp.h" 
-#include "network_tcp.h" 
+#include "network_tcp.h"
+#include "routing.h"
 
 #define BUFFER_SIZE 256 
 #define MAX_NEIGHBORS 10
-
-typedef enum { FORWARDING, COORDINATION } RouteState;
-typedef struct {
-    char dest[4];     
-    int neighbor_fd;
-    int distance; // n saltos para o destino
-    RouteState state;
-} Route;
-
-// Nova estrutura para vizinhos no array
-typedef struct {
-    int fd;
-    char id[4];
-} Neighbor;
-
-typedef struct { 
-    char net[4]; 
-    char id[4]; 
-    char myIP[16]; 
-    int myTCP; 
-    int is_joined; 
-    
-    // MUDANÇA: Array de vizinhos em vez de prev/next fixos
-    Neighbor neighbors[MAX_NEIGHBORS];
-    int neighbor_count;
-    
-    int monitoring;
-    Route routing_table[100];
-    int route_count;
-} NodeState; 
 
 NodeState node; 
 char regIP_buf[128];  
@@ -52,20 +23,6 @@ char *regIP;
 int regUDP;   
 
 // --- FUNÇÕES AUXILIARES ---
-
-void add_route(char *dest_id, int fd) {
-    for (int i = 0; i < node.route_count; i++) {
-        if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
-            node.routing_table[i].neighbor_fd = fd;
-            return;
-        }
-    }
-    if (node.route_count < 100) {
-        strcpy(node.routing_table[node.route_count].dest, dest_id);
-        node.routing_table[node.route_count].neighbor_fd = fd;
-        node.route_count++;
-    }
-}
 
 // Limpa rotas que usavam um FD que foi fechado
 void clean_routing_table_by_fd(int fd) {
@@ -152,15 +109,6 @@ void update_route_state(char *dest_id, RouteState new_state) {
     }
 }
 
-void handle_uncoord(char *dest_id, int fd) {
-    for (int i = 0; i < node.route_count; i++) {
-        // Se recebo UNCOORD de quem eu dependia, a rota torna-se inválida ou entra em coordenação
-        if (strcmp(node.routing_table[i].dest, dest_id) == 0 && node.routing_table[i].neighbor_fd == fd) {
-            node.routing_table[i].state = COORDINATION;
-            // Nota: Em implementações mais avançadas, aqui poderias remover a rota para forçar nova descoberta
-        }
-    }
-}
 
 // --- MAIN ---
 
@@ -381,6 +329,15 @@ int main(int argc, char *argv[]) {
 
                 if (n <= 0) {
                     remove_neighbor_by_index(i);
+                    int dead_fd = current_fd;
+
+                    for (int r = 0; r < node.route_count; r++) {
+
+                        if (node.routing_table[r].neighbor_fd == dead_fd) {
+
+                            start_coordination(node.routing_table[r].dest, -1);
+                        }
+                    }
                     i--; 
                 } else {
                     buffer[n] = '\0';
@@ -416,7 +373,7 @@ int main(int argc, char *argv[]) {
                     else if (strcmp(cmd, "COORD") == 0) {
                         char dest_id[4];
                         if (sscanf(buffer, "%*s %s", dest_id) == 1) {
-                            update_route_state(dest_id, COORDINATION); // Muda estado para coordenação
+                            handle_coord(dest_id, current_fd);
                         }
                     }
 
