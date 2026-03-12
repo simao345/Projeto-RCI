@@ -232,14 +232,35 @@ int main(int argc, char *argv[]) {
                     } 
                     break; 
                 case 2: // LEAVE
-                    if (!node.is_joined) { 
-                        printf("O nó não está registado em nenhuma rede.\n"); 
-                    } else { 
-                        if (unregister_node(regIP, regUDP, node.net, node.id) == 0) { 
-                            node.is_joined = 0; 
-                        } 
+                    if (!node.is_joined) {
+                        printf("O nó não está registado em nenhuma rede.\n");
                     } 
-                    break; 
+                    else {
+                        if (unregister_node(regIP, regUDP, node.net, node.id) == 0) {
+
+                            // fechar sockets dos vizinhos
+                            for(int i = 0; i < node.neighbor_count; i++) {
+                                close(node.neighbors[i].fd);
+                            }
+
+                            // limpar vizinhos
+                            node.neighbor_count = 0;
+                            memset(node.neighbors, 0, sizeof(node.neighbors));
+
+                            // limpar routing table
+                            node.route_count = 0;
+                            memset(node.routing_table, 0, sizeof(node.routing_table));
+
+                            // limpar estado do nó
+                            memset(node.net, 0, sizeof(node.net));
+                            memset(node.id, 0, sizeof(node.id));
+
+                            node.is_joined = 0;
+
+                            printf("Nó saiu da rede e estado foi limpo.\n");
+                        }
+                    }
+                    break;
                 case 3: // EXIT
                     if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id); 
                     exit(0); 
