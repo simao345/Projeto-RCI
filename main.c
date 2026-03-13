@@ -11,7 +11,8 @@
 
 #include "interface.h" 
 #include "server_udp.h" 
-#include "network_tcp.h" 
+#include "network_tcp.h"
+#include "colours.h" 
 
 #define BUFFER_SIZE 256 
 #define MAX_NEIGHBORS 10
@@ -291,10 +292,18 @@ int main(int argc, char *argv[]) {
                         } 
                     } 
                     break; 
-                case 7: // SHOW NEIGHBOURS
-                    printf("--- Vizinhos do Nó %s (%d/%d) ---\n", node.id, node.neighbor_count, MAX_NEIGHBORS); 
-                    for(int i=0; i<node.neighbor_count; i++)
-                        printf("ID: %s | FD: %d\n", node.neighbors[i].id, node.neighbors[i].fd);
+                case 7: // SHOW NEIGHBORS (sg)
+                    printf("\n%s--- %sLISTA DE VIZINHOS ATIVOS (Nó %s)%s %s---\n", BOLD, MAGENTA, node.id, RESET, MAGENTA);
+                    printf("%s%-10s %-10s %s\n", BOLD, "ID NÓ", "SOCKET FD", RESET);
+                    printf("---------- ----------\n");
+
+                    for (int i = 0; i < node.neighbor_count; i++) {
+                        // IDs em Verde, FDs em Ciano
+                        printf("%s%-10s%s %s%-10d%s\n", 
+                            GREEN, node.neighbors[i].id, RESET, 
+                            CYAN, node.neighbors[i].fd, RESET);
+                    }
+                    printf("\n");
                     break; 
                 case 8: // REMOVE EDGE (re <id>)
                     {
@@ -322,24 +331,36 @@ int main(int argc, char *argv[]) {
                     }
                     break;
                 case 10: // SHOW ROUTING (sr)
-                    printf("\n--- TABELA DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
-                    // Aumentamos os espaços para garantir que nada se sobrepõe
-                    printf("%-10s %-13s %-10s %-12s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
-                    printf("---------- ------------- ---------- ------------\n");
+                    printf("\n%s--- %sTABELA DE ENCAMINHAMENTO (Nó %s)%s %s---\n", BOLD, CYAN, node.id, RESET, CYAN);
+                    
+                    // Cabeçalho com cores e sublinhado visual
+                    printf("%s%-10s %-15s %-10s %-10s%s\n", BOLD, "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)", RESET);
+                    printf("%s---------- --------------- ---------- ----------%s\n", WHITE, RESET);
                     
                     for (int i = 0; i < node.route_count; i++) {
-                        char *state_str = (node.routing_table[i].state == FORWARDING) ? "EXPEDIÇÃO" : "COORDENAÇÃO";
-                        
-                        // Usamos exatamente os mesmos números do cabeçalho (-10, -15, -10, -10)
-                        printf("%-10s %-15s %-10d ", 
-                            node.routing_table[i].dest, 
-                            state_str, 
-                            node.routing_table[i].distance);
+                        char *state_str;
+                        char *color;
 
-                        if (node.routing_table[i].neighbor_fd == -1) {
-                            printf("%-12s\n", "local");
+                        // Definir cor baseada no estado
+                        if (node.routing_table[i].state == FORWARDING) {
+                            state_str = "EXPEDIÇÃO";
+                            color = GREEN;
                         } else {
-                            printf("%-12d\n", node.routing_table[i].neighbor_fd);
+                            state_str = "COORDENAÇÃO";
+                            color = RED;
+                        }
+                        
+                        // Imprimir Destino e Estado (com a cor definida)
+                        printf("%s%-10s %-15s%s ", color, node.routing_table[i].dest, state_str, RESET);
+
+                        // Imprimir Saltos (Amarelo para destacar o número)
+                        printf("%s%-10d%s ", YELLOW, node.routing_table[i].distance, RESET);
+
+                        // Imprimir Vizinho
+                        if (node.routing_table[i].neighbor_fd == -1) {
+                            printf("%s%-10s%s\n", CYAN, "local", RESET);
+                        } else {
+                            printf("%-10d\n", node.routing_table[i].neighbor_fd);
                         }
                     }
                     printf("\n");
