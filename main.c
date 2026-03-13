@@ -123,18 +123,27 @@ void sigint_handler(int sig) {
 void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state) {
     for (int i = 0; i < node.route_count; i++) {
         if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
-            // Se encontrarmos um caminho novo (mesmo que mais longo) enquanto estamos em COORD,
-            // ou um caminho mais curto enquanto em FORWARDING:
-            if (node.routing_table[i].state == COORDINATION || new_dist < node.routing_table[i].distance) {
+            
+            // Lógica de Transição de Estado:
+            // 1. Se recebemos um ROUTE (state == FORWARDING), a rota passa a ser oficial.
+            // 2. Se a nova distância for menor, atualizamos sempre (atalho).
+            // 3. Se a informação vem do mesmo vizinho, atualizamos para refletir a topologia dele.
+            
+            if (state == FORWARDING || new_dist < node.routing_table[i].distance || fd == node.routing_table[i].neighbor_fd) {
                 node.routing_table[i].distance = new_dist;
                 node.routing_table[i].neighbor_fd = fd;
-                node.routing_table[i].state = state; // Volta a FORWARDING
-                if (node.monitoring) printf("[SISTEMA] Rota para %s recuperada via FD %d.\n", dest_id, fd);
+                
+                // Se algum dia a rota foi validada por um announce, ela mantém-se FORWARDING
+                // a menos que um COORD a invalide explicitamente.
+                if (state == FORWARDING) {
+                    node.routing_table[i].state = FORWARDING;
+                }
             }
             return;
         }
     }
-    // Se não existir e houver espaço, adicionar novo destino
+
+    // Se o destino não existe na tabela, adicionamos com o estado fornecido
     if (node.route_count < 100) {
         strcpy(node.routing_table[node.route_count].dest, dest_id);
         node.routing_table[node.route_count].distance = new_dist;
@@ -286,6 +295,9 @@ int main(int argc, char *argv[]) {
                                 node.neighbors[node.neighbor_count].fd = fd;
                                 strcpy(node.neighbors[node.neighbor_count].id, arg_net);
                                 node.neighbor_count++;
+
+                                update_routing_table(arg_net, 1, fd, COORDINATION);
+
                                 char msg[64]; sprintf(msg, "NEIGHBOR %s\n", node.id); 
                                 write(fd, msg, strlen(msg)); 
                             }
@@ -317,53 +329,41 @@ int main(int argc, char *argv[]) {
                         if(!found) printf("Erro: Nó %s não é teu vizinho.\n", arg_net);
                     }
                     break; 
-                case 9: // ANNOUNCE (a)
-                    if (node.is_joined) {
-                        update_routing_table(node.id, 0, -1, FORWARDING);
-                        char route_msg[64];
-                        // Um nó anuncia-se a si próprio com 0 saltos
-                        sprintf(route_msg, "ROUTE %s 0\n", node.id); 
+                case 9: // announce (a id)
+                    // Se o ID for o meu, eu inicio o anúncio
+                    if (strcmp(arg_net, node.id) == 0) {
+                        char msg[64];
+                        sprintf(msg, "ROUTE %s 0\n", node.id);
+                        printf("Anúncio de rota iniciado para o Nó %s.\n", node.id);
                         
-                        for (int i = 0; i < node.neighbor_count; i++) {
-                            write(node.neighbors[i].fd, route_msg, strlen(route_msg));
+                        for (int j = 0; j < node.neighbor_count; j++) {
+                            write(node.neighbors[j].fd, msg, strlen(msg));
                         }
-                        printf("Anúncio de rota (ROUTE %s 0) enviado aos vizinhos.\n", node.id);
                     }
                     break;
-                case 10: // SHOW ROUTING (sr)
-                    printf("\n%s--- %sTABELA DE ENCAMINHAMENTO (Nó %s)%s %s---\n", BOLD, CYAN, node.id, RESET, CYAN);
+                case 10: // sr
+                    printf("\n--- TABELA DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
+                    printf("%-10s %-15s %-10s %-15s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
                     
-                    // Cabeçalho com cores e sublinhado visual
-                    printf("%s%-10s %-15s %-10s %-10s%s\n", BOLD, "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)", RESET);
-                    printf("%s---------- --------------- ---------- ----------%s\n", WHITE, RESET);
-                    
-                    for (int i = 0; i < node.route_count; i++) {
-                        char *state_str;
-                        char *color;
+                    // O próprio nó é sempre visível
+                    printf("%-10s %-15s %-10d %-15s\n", node.id, "EXPEDIÇÃO", 0, "local");
 
-                        // Definir cor baseada no estado
-                        if (node.routing_table[i].state == FORWARDING) {
-                            state_str = "EXPEDIÇÃO";
-                            color = GREEN;
-                        } else {
-                            state_str = "COORDENAÇÃO";
-                            color = RED;
-                        }
-                        
-                        // Imprimir Destino e Estado (com a cor definida)
-                        printf("%s%-10s %-15s%s ", color, node.routing_table[i].dest, state_str, RESET);
-
-                        // Imprimir Saltos (Amarelo para destacar o número)
-                        printf("%s%-10d%s ", YELLOW, node.routing_table[i].distance, RESET);
-
-                        // Imprimir Vizinho
-                        if (node.routing_table[i].neighbor_fd == -1) {
-                            printf("%s%-10s%s\n", CYAN, "local", RESET);
-                        } else {
-                            printf("%-10d\n", node.routing_table[i].neighbor_fd);
+                    int encontrou_visivel = 0;
+                    for (int r = 0; r < node.route_count; r++) {
+                        // Só mostramos se o estado for FORWARDING
+                        if (node.routing_table[r].state == FORWARDING) {
+                            printf("%-10s %-15s %-10d %-15d\n", 
+                                node.routing_table[r].dest, 
+                                "EXPEDIÇÃO", 
+                                node.routing_table[r].distance, 
+                                node.routing_table[r].neighbor_fd);
+                            encontrou_visivel = 1;
                         }
                     }
-                    printf("\n");
+                    
+                    if (!encontrou_visivel && node.route_count > 0) {
+                        printf("\n(Existem rotas conhecidas em segundo plano, mas nenhum nó fez 'announce' ainda)\n");
+                    }
                     break;
                 case 11: // start monitor (sm)
                     node.monitoring = 1;
@@ -411,10 +411,25 @@ int main(int argc, char *argv[]) {
 
                     // 1. Identificação Inicial (Apenas guarda o ID, sem criar rota)
                     if (strcmp(cmd, "NEIGHBOR") == 0) {
-                        sscanf(buffer, "%*s %s", node.neighbors[i].id);
-                        printf("\n[TCP] Vizinho no fd %d identificou-se como Nó %s.\n> ", current_fd, node.neighbors[i].id);
-                        fflush(stdout);
-                    } 
+                        char neighbor_id[4];
+                        
+                        // 1. Extrair o ID do vizinho que se acabou de ligar
+                        if (sscanf(buffer, "%*s %s", neighbor_id) == 1) {
+                            // 2. Guardar o ID no array de vizinhos para futuras comunicações
+                            strcpy(node.neighbors[i].id, neighbor_id);
+
+                            // 3. Atualizar a tabela de encaminhamento interna:
+                            // - Distância: 1 (é um vizinho direto)
+                            // - Estado: COORDINATION (Está na topologia, mas invisível ao 'sr' até haver 'announce')
+                            update_routing_table(neighbor_id, 1, current_fd, COORDINATION);
+
+                            if (node.monitoring) {
+                                printf("\n%s[TCP]%s Nó %s ligado no FD %d (Estado: COORDINATION).\n", 
+                                    CYAN, RESET, neighbor_id, current_fd);
+                            }
+                        }
+                        printf("> "); fflush(stdout);
+                    }
                     
                     // 2. Protocolo de Encaminhamento: ROUTE dest n
                     else if (strcmp(cmd, "ROUTE") == 0) {
