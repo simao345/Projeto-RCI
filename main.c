@@ -419,15 +419,24 @@ int main(int argc, char *argv[]) {
                     // 2. Protocolo de Encaminhamento: ROUTE dest n
                     else if (strcmp(cmd, "ROUTE") == 0) {
                         char dest_id[4];
-                        int dist;
-                        if (sscanf(buffer, "%*s %s %d", dest_id, &dist) == 2) {
-                            // Adiciona ou atualiza a rota com estado FORWARDING e distância +1
-                            update_routing_table(dest_id, dist + 1, current_fd, FORWARDING);
+                        int dist_recebida;
+                        if (sscanf(buffer, "%*s %s %d", dest_id, &dist_recebida) == 2) {
                             
-                            // Propaga o anúncio para os restantes vizinhos
-                            for(int j=0; j < node.neighbor_count; j++) {
-                                if(node.neighbors[j].fd != current_fd) {
-                                    write(node.neighbors[j].fd, buffer, n);
+                            // CORREÇÃO: A nossa distância para o destino é a distância que o vizinho
+                            // nos enviou + o salto para chegar a esse vizinho.
+                            int nova_distancia = dist_recebida + 1;
+
+                            // Atualizamos a tabela com a nova distância incrementada
+                            update_routing_table(dest_id, nova_distancia, current_fd, FORWARDING);
+
+                            // PROPAGAÇÃO: Enviamos para os outros vizinhos a distância que nós calculámos
+                            char msg_to_propagate[64];
+                            sprintf(msg_to_propagate, "ROUTE %s %d\n", dest_id, nova_distancia);
+
+                            for (int j = 0; j < node.neighbor_count; j++) {
+                                // Split Horizon: não enviar de volta para quem nos deu a rota
+                                if (node.neighbors[j].fd != current_fd) {
+                                    write(node.neighbors[j].fd, msg_to_propagate, strlen(msg_to_propagate));
                                 }
                             }
                         }
