@@ -347,44 +347,46 @@ int main(int argc, char *argv[]) {
                         }
                     }
                     break;
-                case 10: // sr
-                    printf("\n--- TABELA DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
+                case 10: // sr ID
+                    // Se o utilizador não especificou um ID (arg_net vazio), 
+                    // podemos mostrar a ajuda ou a tabela geral. 
+                    // Mas focando no teu objetivo: mostrar o caminho para o ID especificado.
+                    
+                    printf("\n--- ENCAMINHAMENTO PARA O NÓ %s (A partir do Nó %s) ---\n", arg_net, node.id);
                     printf("%-10s %-15s %-10s %-15s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
                     
-                    // 1. Imprime o próprio nó
+                    // 1. O próprio nó aparece sempre como ponto de partida
                     printf("%-10s %-15s %-10d %-15s\n", node.id, "EXPEDIÇÃO", 0, "local");
 
-                    int encontrou_remoto = 0;
-                    for (int r = 0; r < node.route_count; r++) {
-                        // 2. Só imprime rotas para OUTROS nós que estejam em estado FORWARDING
-                        if (strcmp(node.routing_table[r].dest, node.id) != 0 && node.routing_table[r].state == FORWARDING) {
-                            printf("%-10s %-15s %-10d %-15d\n", 
-                                node.routing_table[r].dest, 
-                                "EXPEDIÇÃO", 
-                                node.routing_table[r].distance, 
-                                node.routing_table[r].neighbor_fd);
-                            encontrou_remoto = 1;
-                        }
-                    }
+                    int encontrou = 0;
                     
-                    // CORREÇÃO DO AVISO: Usar a variável para dar feedback ao utilizador
-                    if (!encontrou_remoto) {
-                        printf("\n(Nenhuma rota remota anunciada até ao momento)\n");
-                    }
-
-                    // Se o utilizador pediu um ID específico (arg_net) e ele não está em FORWARDING
-                    if (arg_net[0] != '\0' && strcmp(arg_net, node.id) != 0) {
-                        int existe_em_coord = 0;
-                        for(int r = 0; r < node.route_count; r++) {
-                            if(strcmp(node.routing_table[r].dest, arg_net) == 0 && node.routing_table[r].state == COORDINATION) {
-                                existe_em_coord = 1; 
-                                break;
+                    // 2. Se o utilizador pediu um ID que não é o próprio nó
+                    if (strcmp(arg_net, node.id) != 0) {
+                        for (int r = 0; r < node.route_count; r++) {
+                            // Filtramos pelo ID especificado E pelo estado FORWARDING (announce feito)
+                            if (strcmp(node.routing_table[r].dest, arg_net) == 0) {
+                                if (node.routing_table[r].state == FORWARDING) {
+                                    printf("%-10s %-15s %-10d %-15d\n", 
+                                        node.routing_table[r].dest, 
+                                        "EXPEDIÇÃO", 
+                                        node.routing_table[r].distance, 
+                                        node.routing_table[r].neighbor_fd);
+                                    encontrou = 1;
+                                } else {
+                                    printf("\n[INFO] O nó %s é conhecido, mas ainda não fez 'announce'.\n", arg_net);
+                                    encontrou = -1; // Encontrou mas não está ativo
+                                }
+                                break; // Encontrado o destino, não precisamos de procurar mais
                             }
                         }
-                        if (existe_em_coord) {
-                            printf("Nota: O nó %s é conhecido pela topologia, mas ainda não fez 'announce'.\n", arg_net);
-                        }
+                    } else {
+                        encontrou = 1; // O destino era o próprio nó
                     }
+
+                    if (encontrou == 0 && arg_net[0] != '\0') {
+                        printf("\n[ERRO] Rota para o nó %s desconhecida.\n", arg_net);
+                    }
+                    printf("\n");
                     break;
                 case 11: // start monitor (sm)
                     node.monitoring = 1;
