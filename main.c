@@ -323,18 +323,39 @@ int main(int argc, char *argv[]) {
                     }
                     printf("\n");
                     break; 
-                case 8: // REMOVE EDGE (re <id>)
-                    {
-                        int found = 0;
-                        for(int i=0; i<node.neighbor_count; i++) {
-                            if(strcmp(node.neighbors[i].id, arg_net) == 0) {
-                                remove_neighbor_by_index(i);
-                                found = 1; break;
+                case 8: // re (Remove Edge)
+                    for (int i = 0; i < node.neighbor_count; i++) {
+                        if (strcmp(node.neighbors[i].id, arg_net) == 0) {
+                            int fd_removido = node.neighbors[i].fd;
+
+                            // 1. Avisar a rede sobre todas as rotas que dependiam deste FD
+                            for (int r = 0; r < node.route_count; r++) {
+                                if (node.routing_table[r].neighbor_fd == fd_removido) {
+                                    char msg_coord[64];
+                                    sprintf(msg_coord, "COORD %s\n", node.routing_table[r].dest);
+                                    
+                                    // Propagamos o COORD para os OUTROS vizinhos
+                                    for (int j = 0; j < node.neighbor_count; j++) {
+                                        if (node.neighbors[j].fd != fd_removido) {
+                                            write(node.neighbors[j].fd, msg_coord, strlen(msg_coord));
+                                        }
+                                    }
+                                    // Mudamos o estado para COORDINATION (invisível no sr)
+                                    node.routing_table[r].state = COORDINATION;
+                                }
                             }
+
+                            // 2. Fechar o socket e remover do array de vizinhos
+                            close(fd_removido);
+                            for (int k = i; k < node.neighbor_count - 1; k++) {
+                                node.neighbors[k] = node.neighbors[k+1];
+                            }
+                            node.neighbor_count--;
+                            printf("Ligação com o nó %s removida.\n", arg_net);
+                            break;
                         }
-                        if(!found) printf("Erro: Nó %s não é teu vizinho.\n", arg_net);
                     }
-                    break; 
+                    break;
                 case 9: // announce (a id)
                     // Se o ID for o meu, eu inicio o anúncio
                     if (strcmp(arg_net, node.id) == 0) {
@@ -484,7 +505,22 @@ int main(int argc, char *argv[]) {
                     else if (strcmp(cmd, "COORD") == 0) {
                         char dest_id[4];
                         if (sscanf(buffer, "%*s %s", dest_id) == 1) {
-                            update_route_state(dest_id, COORDINATION); // Muda estado para coordenação
+                            for (int r = 0; r < node.route_count; r++) {
+                                if (strcmp(node.routing_table[r].dest, dest_id) == 0) {
+                                    // Se eu uso este vizinho para chegar ao destino, entro em coordenação
+                                    if (node.routing_table[r].neighbor_fd == current_fd) {
+                                        node.routing_table[r].state = COORDINATION;
+
+                                        // Propago o COORD para os meus outros vizinhos
+                                        for (int j = 0; j < node.neighbor_count; j++) {
+                                            if (node.neighbors[j].fd != current_fd) {
+                                                write(node.neighbors[j].fd, buffer, strlen(buffer));
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
 
@@ -492,8 +528,23 @@ int main(int argc, char *argv[]) {
                     else if (strcmp(cmd, "UNCOORD") == 0) {
                         char dest_id[4];
                         if (sscanf(buffer, "%*s %s", dest_id) == 1) {
-                            // Lógica para remover a dependência deste vizinho para o destino
-                            handle_uncoord(dest_id, current_fd);
+                            for (int r = 0; r < node.route_count; r++) {
+                                if (strcmp(node.routing_table[r].dest, dest_id) == 0) {
+                                    if (node.routing_table[r].neighbor_fd == current_fd) {
+                                        // Removemos ou invalidamos a rota (distância infinita)
+                                        node.routing_table[r].distance = 99; 
+                                        node.routing_table[r].state = COORDINATION;
+                                        
+                                        // Propaga o UNCOORD
+                                        for (int j = 0; j < node.neighbor_count; j++) {
+                                            if (node.neighbors[j].fd != current_fd) {
+                                                write(node.neighbors[j].fd, buffer, strlen(buffer));
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
 
