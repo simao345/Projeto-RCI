@@ -121,29 +121,35 @@ void sigint_handler(int sig) {
 }
 
 void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state) {
+    // REGRA: Nunca adicionar o próprio nó à tabela de rotas interna
+    if (strcmp(dest_id, node.id) == 0) {
+        return;
+    }
+
     for (int i = 0; i < node.route_count; i++) {
         if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
             
-            // Lógica de Transição de Estado:
-            // 1. Se recebemos um ROUTE (state == FORWARDING), a rota passa a ser oficial.
-            // 2. Se a nova distância for menor, atualizamos sempre (atalho).
-            // 3. Se a informação vem do mesmo vizinho, atualizamos para refletir a topologia dele.
-            
+            // Condições para atualizar: 
+            // - É um anúncio oficial (FORWARDING)
+            // - É um caminho mais curto (Atalho)
+            // - É uma atualização do vizinho que já usamos
             if (state == FORWARDING || new_dist < node.routing_table[i].distance || fd == node.routing_table[i].neighbor_fd) {
                 node.routing_table[i].distance = new_dist;
                 node.routing_table[i].neighbor_fd = fd;
                 
-                // Se algum dia a rota foi validada por um announce, ela mantém-se FORWARDING
-                // a menos que um COORD a invalide explicitamente.
+                // Se recebermos um ROUTE (state FORWARDING), a rota torna-se visível
                 if (state == FORWARDING) {
                     node.routing_table[i].state = FORWARDING;
+                } else if (state == COORDINATION && fd == node.routing_table[i].neighbor_fd) {
+                    // Se o vizinho que usávamos mandou COORD, mudamos o estado
+                    node.routing_table[i].state = COORDINATION;
                 }
             }
             return;
         }
     }
 
-    // Se o destino não existe na tabela, adicionamos com o estado fornecido
+    // Se o destino não existe na tabela e não é o próprio nó, adicionamos
     if (node.route_count < 100) {
         strcpy(node.routing_table[node.route_count].dest, dest_id);
         node.routing_table[node.route_count].distance = new_dist;
@@ -345,24 +351,39 @@ int main(int argc, char *argv[]) {
                     printf("\n--- TABELA DE ENCAMINHAMENTO (Nó %s) ---\n", node.id);
                     printf("%-10s %-15s %-10s %-15s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
                     
-                    // O próprio nó é sempre visível
+                    // 1. Imprime o próprio nó
                     printf("%-10s %-15s %-10d %-15s\n", node.id, "EXPEDIÇÃO", 0, "local");
 
-                    int encontrou_visivel = 0;
+                    int encontrou_remoto = 0;
                     for (int r = 0; r < node.route_count; r++) {
-                        // Só mostramos se o estado for FORWARDING
-                        if (node.routing_table[r].state == FORWARDING) {
+                        // 2. Só imprime rotas para OUTROS nós que estejam em estado FORWARDING
+                        if (strcmp(node.routing_table[r].dest, node.id) != 0 && node.routing_table[r].state == FORWARDING) {
                             printf("%-10s %-15s %-10d %-15d\n", 
                                 node.routing_table[r].dest, 
                                 "EXPEDIÇÃO", 
                                 node.routing_table[r].distance, 
                                 node.routing_table[r].neighbor_fd);
-                            encontrou_visivel = 1;
+                            encontrou_remoto = 1;
                         }
                     }
                     
-                    if (!encontrou_visivel && node.route_count > 0) {
-                        printf("\n(Existem rotas conhecidas em segundo plano, mas nenhum nó fez 'announce' ainda)\n");
+                    // CORREÇÃO DO AVISO: Usar a variável para dar feedback ao utilizador
+                    if (!encontrou_remoto) {
+                        printf("\n(Nenhuma rota remota anunciada até ao momento)\n");
+                    }
+
+                    // Se o utilizador pediu um ID específico (arg_net) e ele não está em FORWARDING
+                    if (arg_net[0] != '\0' && strcmp(arg_net, node.id) != 0) {
+                        int existe_em_coord = 0;
+                        for(int r = 0; r < node.route_count; r++) {
+                            if(strcmp(node.routing_table[r].dest, arg_net) == 0 && node.routing_table[r].state == COORDINATION) {
+                                existe_em_coord = 1; 
+                                break;
+                            }
+                        }
+                        if (existe_em_coord) {
+                            printf("Nota: O nó %s é conhecido pela topologia, mas ainda não fez 'announce'.\n", arg_net);
+                        }
                     }
                     break;
                 case 11: // start monitor (sm)
