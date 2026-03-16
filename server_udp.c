@@ -1,4 +1,3 @@
-#include "server_udp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +8,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
+
+#include "server_udp.h"
 
 // Função auxiliar para gerar um TID (Transaction ID) de 3 dígitos 
 void generate_tid(char *tid) {
