@@ -12,167 +12,18 @@
 #include "interface.h" 
 #include "server_udp.h" 
 #include "network_tcp.h"
-#include "colours.h" 
+#include "colours.h"
+#include "routing.h"
 
-#define BUFFER_SIZE 256 
-#define MAX_NEIGHBORS 10
+#define BUFFER_SIZE 256
 
-typedef enum { FORWARDING, COORDINATION } RouteState;
-typedef struct {
-    char dest[4];     
-    int neighbor_fd;
-    int distance; // n saltos para o destino
-    RouteState state;
-} Route;
-
-// Nova estrutura para vizinhos no array
-typedef struct {
-    int fd;
-    char id[4];
-} Neighbor;
-
-typedef struct { 
-    char net[4]; 
-    char id[4]; 
-    char myIP[16]; 
-    int myTCP; 
-    int is_joined; 
-    
-    // MUDANÇA: Array de vizinhos em vez de prev/next fixos
-    Neighbor neighbors[MAX_NEIGHBORS];
-    int neighbor_count;
-    
-    int monitoring;
-    Route routing_table[100];
-    int route_count;
-} NodeState; 
-
-NodeState node; 
 char regIP_buf[128];  
 char *regIP; 
 int regUDP;   
 
-// --- FUNÇÕES AUXILIARES ---
-
-void add_route(char *dest_id, int fd) {
-    for (int i = 0; i < node.route_count; i++) {
-        if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
-            node.routing_table[i].neighbor_fd = fd;
-            return;
-        }
-    }
-    if (node.route_count < 100) {
-        strcpy(node.routing_table[node.route_count].dest, dest_id);
-        node.routing_table[node.route_count].neighbor_fd = fd;
-        node.route_count++;
-    }
-}
-
-// Limpa rotas que usavam um FD que foi fechado
-void clean_routing_table_by_fd(int fd) {
-    for (int i = 0; i < node.route_count; i++) {
-        if (node.routing_table[i].neighbor_fd == fd) {
-            for (int j = i; j < node.route_count - 1; j++) {
-                node.routing_table[j] = node.routing_table[j + 1];
-            }
-            node.route_count--;
-            i--; 
-        }
-    }
-}
-
-void remove_neighbor_by_index(int index) {
-    int fd_to_close = node.neighbors[index].fd;
-    char lost_neighbor_id[4];
-    strcpy(lost_neighbor_id, node.neighbors[index].id);
-
-    printf("\n[SISTEMA] Ligação perdida com Nó %s (fd %d).\n", lost_neighbor_id, fd_to_close);
-
-    // 1. Identificar rotas que dependiam deste vizinho
-    for (int i = 0; i < node.route_count; i++) {
-        if (node.routing_table[i].neighbor_fd == fd_to_close) {
-            // Entramos em estado de COORDENAÇÃO para este destino
-            node.routing_table[i].state = COORDINATION;
-            
-            // 2. Avisar todos os OUTROS vizinhos da perda
-            char coord_msg[64];
-            sprintf(coord_msg, "COORD %s\n", node.routing_table[i].dest);
-            
-            for (int j = 0; j < node.neighbor_count; j++) {
-                if (node.neighbors[j].fd != fd_to_close) {
-                    write(node.neighbors[j].fd, coord_msg, strlen(coord_msg));
-                }
-            }
-        }
-    }
-
-    // 3. Fechar socket e limpar array de vizinhos
-    close(fd_to_close);
-    for (int i = index; i < node.neighbor_count - 1; i++) {
-        node.neighbors[i] = node.neighbors[i + 1];
-    }
-    node.neighbor_count--;
-    printf("> "); fflush(stdout);
-}
-
 void sigint_handler(int sig) { 
     if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id); 
     exit(0); 
-}
-
-void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state) {
-    if (strcmp(dest_id, node.id) == 0) return;
-
-    for (int i = 0; i < node.route_count; i++) {
-        if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
-            
-            // Se o que recebemos é um anúncio oficial (ROUTE), 
-            // ou se é um atalho (new_dist < atual)
-            if (state == FORWARDING || new_dist < node.routing_table[i].distance || fd == node.routing_table[i].neighbor_fd) {
-                
-                // MUDANÇA CRUCIAL:
-                // Se a rota já estava em FORWARDING e estamos apenas a atualizar a distância (atalho),
-                // não a devemos "despromover" para COORDINATION.
-                if (node.routing_table[i].state == FORWARDING || state == FORWARDING) {
-                    node.routing_table[i].state = FORWARDING;
-                } else {
-                    node.routing_table[i].state = state;
-                }
-
-                node.routing_table[i].distance = new_dist;
-                node.routing_table[i].neighbor_fd = fd;
-            }
-            return;
-        }
-    }
-
-    // Se não existir, adiciona normalmente
-    if (node.route_count < 100) {
-        strcpy(node.routing_table[node.route_count].dest, dest_id);
-        node.routing_table[node.route_count].distance = new_dist;
-        node.routing_table[node.route_count].neighbor_fd = fd;
-        node.routing_table[node.route_count].state = state;
-        node.route_count++;
-    }
-}
-
-void update_route_state(char *dest_id, RouteState new_state) {
-    for (int i = 0; i < node.route_count; i++) {
-        if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
-            node.routing_table[i].state = new_state;
-            return;
-        }
-    }
-}
-
-void handle_uncoord(char *dest_id, int fd) {
-    for (int i = 0; i < node.route_count; i++) {
-        // Se recebo UNCOORD de quem eu dependia, a rota torna-se inválida ou entra em coordenação
-        if (strcmp(node.routing_table[i].dest, dest_id) == 0 && node.routing_table[i].neighbor_fd == fd) {
-            node.routing_table[i].state = COORDINATION;
-            // Nota: Em implementações mais avançadas, aqui poderias remover a rota para forçar nova descoberta
-        }
-    }
 }
 
 // --- MAIN ---

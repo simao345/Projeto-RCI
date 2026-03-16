@@ -4,7 +4,7 @@ CFLAGS = -Wall -g # -Wall mostra todos os avisos, -g permite usar o gdb [cite: 2
 LDFLAGS = 
 
 # Lista de ficheiros objeto (gerados a partir dos teus ficheiros .c)
-OBJ = main.o interface.o server_udp.o network_tcp.o
+OBJ = main.o interface.o server_udp.o network_tcp.o routing.o
 
 # Nome do executável final
 TARGET = OWR
@@ -29,6 +29,12 @@ server_udp.o: server_udp.c server_udp.h
 
 network_tcp.o: network_tcp.c network_tcp.h
 	$(CC) $(CFLAGS) -c network_tcp.c
+
+network_tcp.o: network_tcp.c network_tcp.h
+	$(CC) $(CFLAGS) -c network_tcp.c
+
+routing.o: routing.c routing.h
+	$(CC) $(CFLAGS) -c routing.c
 
 # Limpeza de ficheiros temporários
 clean:
