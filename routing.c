@@ -42,42 +42,26 @@ void clean_routing_table_by_fd(int fd) {
 
 /* update routing table entry */
 void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state) {
-    // REGRA 1: Filtro de Origem
-    // Se o anúncio é sobre mim, eu ignoro. Eu sou sempre distância 0.
     if (strcmp(dest_id, node.id) == 0) return;
 
     for (int i = 0; i < node.route_count; i++) {
         if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
             
-            /* REGRA 2: Proteção contra Loop (Contagem ao Infinito)
-               Só atualizamos se:
-               1. A nova distância for estritamente MENOR (encontrámos um atalho real).
-               2. A informação vem do MESMO vizinho que já usávamos (a rota mudou na origem).
-               3. Estávamos em COORDINATION e recebemos um FORWARDING oficial.
-            */
-            
+            // Regras de Ouro do Distance Vector:
             int e_atalho = (new_dist < node.routing_table[i].distance);
             int vem_do_mesmo_vizinho = (fd == node.routing_table[i].neighbor_fd);
-            int validacao_oficial = (state == FORWARDING && node.routing_table[i].state == COORDINATION);
-
-            if (e_atalho || vem_do_mesmo_vizinho || validacao_oficial) {
-                
-                // Manter em FORWARDING se já estava ou se o novo estado é FORWARDING
-                if (node.routing_table[i].state == FORWARDING || state == FORWARDING) {
-                    node.routing_table[i].state = FORWARDING;
-                } else {
-                    node.routing_table[i].state = state;
-                }
-
+            
+            if (e_atalho || vem_do_mesmo_vizinho) {
                 node.routing_table[i].distance = new_dist;
                 node.routing_table[i].neighbor_fd = fd;
+                node.routing_table[i].state = state; // Se recebemos ROUTE, passa a FORWARDING
             }
             return;
         }
     }
 
-    // Se não existir, adiciona normalmente (Limite de segurança para evitar tabelas infinitas)
-    if (node.route_count < 100 && new_dist < 16) { // 16 é o "infinito" padrão em RIP
+    // Novo destino: inserir sempre se estiver dentro dos limites
+    if (node.route_count < 100 && new_dist < 16) {
         strcpy(node.routing_table[node.route_count].dest, dest_id);
         node.routing_table[node.route_count].distance = new_dist;
         node.routing_table[node.route_count].neighbor_fd = fd;
