@@ -346,21 +346,31 @@ int main(int argc, char *argv[]) {
                         int dist_recebida;
                         if (sscanf(buffer, "%*s %s %d", dest_id, &dist_recebida) == 2) {
                             
-                            // CORREÇÃO: A nossa distância para o destino é a distância que o vizinho
-                            // nos enviou + o salto para chegar a esse vizinho.
-                            int nova_distancia = dist_recebida + 1;
+                            int nova_dist = dist_recebida + 1;
 
-                            // Atualizamos a tabela com a nova distância incrementada
-                            update_routing_table(dest_id, nova_distancia, current_fd, FORWARDING);
+                            // 1. Antes de atualizar, guardamos o que tínhamos
+                            int dist_antiga = 99; // Infinito por defeito
+                            for(int r = 0; r < node.route_count; r++) {
+                                if(strcmp(node.routing_table[r].dest, dest_id) == 0) {
+                                    dist_antiga = node.routing_table[r].distance;
+                                    break;
+                                }
+                            }
 
-                            // PROPAGAÇÃO: Enviamos para os outros vizinhos a distância que nós calculámos
-                            char msg_to_propagate[64];
-                            sprintf(msg_to_propagate, "ROUTE %s %d\n", dest_id, nova_distancia);
+                            // 2. Chamamos a função (que só atualiza se for melhor ou do mesmo vizinho)
+                            update_routing_table(dest_id, nova_dist, current_fd, FORWARDING);
 
-                            for (int j = 0; j < node.neighbor_count; j++) {
-                                // Split Horizon: não enviar de volta para quem nos deu a rota
-                                if (node.neighbors[j].fd != current_fd) {
-                                    write(node.neighbors[j].fd, msg_to_propagate, strlen(msg_to_propagate));
+                            // 3. SÓ PROPAGAMOS se a nossa tabela realmente mudou para melhor
+                            // ou se o destino é novo. Isso impede o "Count to Infinity".
+                            if (nova_dist < dist_antiga) {
+                                char msg_to_propagate[64];
+                                sprintf(msg_to_propagate, "ROUTE %s %d\n", dest_id, nova_dist);
+                                
+                                for (int j = 0; j < node.neighbor_count; j++) {
+                                    // SPLIT HORIZON: Não devolver a quem nos mandou
+                                    if (node.neighbors[j].fd != current_fd) {
+                                        write(node.neighbors[j].fd, msg_to_propagate, strlen(msg_to_propagate));
+                                    }
                                 }
                             }
                         }
