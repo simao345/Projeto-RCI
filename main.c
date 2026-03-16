@@ -170,9 +170,9 @@ int main(int argc, char *argv[]) {
                     } 
                     break; 
                 case 7: // SHOW NEIGHBORS (sg)
-                    printf("\n%s--- %sLISTA DE VIZINHOS ATIVOS (Nó %s)%s %s---\n", BOLD, MAGENTA, node.id, RESET, MAGENTA);
-                    printf("%s%-10s %-10s %s\n", BOLD, "ID NÓ", "SOCKET FD", RESET);
-                    printf("---------- ----------\n");
+                    printf("\n%s%s--- LISTA DE VIZINHOS (Nó %s) ---\n", BOLD, MAGENTA, node.id);
+                    printf("%-10s %-9s %s\n", "ID NÓ", "SOCKET FD", RESET);
+                    printf("--------- ---------\n");
 
                     for (int i = 0; i < node.neighbor_count; i++) {
                         // IDs em Verde, FDs em Ciano
@@ -230,8 +230,9 @@ int main(int argc, char *argv[]) {
                     // podemos mostrar a ajuda ou a tabela geral. 
                     // Mas focando no teu objetivo: mostrar o caminho para o ID especificado.
                     
-                    printf("\n--- ENCAMINHAMENTO PARA O NÓ %s (A partir do Nó %s) ---\n", arg_net, node.id);
-                    printf("%-10s %-15s %-10s %-15s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
+                    printf("\n%s%s--- ENCAMINHAMENTO PARA NÓ %s (FROM NODE %s) ---\n", BOLD, CYAN, arg_net, node.id);
+                    printf("%-10s %-13s %-10s %-15s %s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)", RESET);
+                    printf("---------- ------------- ---------- ------------\n");
                     
                     // 1. O próprio nó aparece sempre como ponto de partida
                     printf("%-10s %-15s %-10d %-15s\n", node.id, "EXPEDIÇÃO", 0, "local");
