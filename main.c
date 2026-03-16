@@ -216,15 +216,13 @@ int main(int argc, char *argv[]) {
                     }
                     break;
                 case 9: // announce (a id)
-                    // Se o ID for o meu, eu inicio o anúncio
-                    if (strcmp(arg_net, node.id) == 0) {
-                        char msg[64];
-                        sprintf(msg, "ROUTE %s 0\n", node.id);
-                        printf("Anúncio de rota iniciado para o Nó %s.\n", node.id);
-                        
-                        for (int j = 0; j < node.neighbor_count; j++) {
-                            write(node.neighbors[j].fd, msg, strlen(msg));
-                        }
+                    char msg[64];
+                    sprintf(msg, "ROUTE %s 0\n", node.id);
+                    if (node.monitoring) {
+                        printf("\n%s[INFO]%s A iniciar anúncio do próprio nó (%s)...\n", YELLOW, RESET, node.id);
+                    }                    
+                    for (int j = 0; j < node.neighbor_count; j++) {
+                        write(node.neighbors[j].fd, msg, strlen(msg));
                     }
                     break;
                 case 10: // sr ID

@@ -30,9 +30,6 @@ server_udp.o: server_udp.c server_udp.h
 network_tcp.o: network_tcp.c network_tcp.h
 	$(CC) $(CFLAGS) -c network_tcp.c
 
-network_tcp.o: network_tcp.c network_tcp.h
-	$(CC) $(CFLAGS) -c network_tcp.c
-
 routing.o: routing.c routing.h
 	$(CC) $(CFLAGS) -c routing.c
 
