@@ -1,34 +1,62 @@
 =========================================================
-      GUIA DE TESTES - PROJETO RCI (VERSÃO 2)
+      GUIA DE TESTES - PROJETO OWR (VERSÃO FINAL)
 =========================================================
+
+Este projeto implementa um protocolo de encaminhamento dinâmico baseado em 
+Distance Vector (Vetor de Distância), permitindo a comunicação entre nós 
+mesmo que não estejam diretamente ligados.
 
 --- FASE 1: PREPARAÇÃO ---
 1. Limpar compilações antigas:
    $ make clean
 
-2. Compilar o código novo:
+2. Compilar o código:
    $ make
 
---- FASE 2: TESTAR LIGAÇÃO UDP AO SERVIDOR DO IST ---
-3. Abrir o Terminal 1 e iniciar o Nó 1 (sem o IP/Porta do simulador para usar o do Técnico por defeito):
-   $ ./OWR 127.0.0.1 58000
+--- FASE 2: GESTÃO DE NÓS (UDP / SERVIDOR DE NOS) ---
+3. Iniciar um nó (ex: Nó 10):
+   $ ./OWR [local IP] [local port] [server IP] [server port]
 
-4. Registar o nó na rede 001 com o ID XX:
-   > j 001 XX
-   (Esperado: "Sucesso: Nó registado no servidor.")
-
-5. Pedir a lista de nós para confirmar que o IST guardou o registo:
-   > n 001
-   (Esperado: O servidor deve devolver a lista e o teu nó 55 tem de lá estar.)
-
---- FASE 3: TESTAR LIGAÇÃO TCP DIRETA (P2P) ---
-6. Abrir o Terminal 2 e iniciar o Nó 2 noutra porta:
-   $ ./OWR 127.0.0.1 58001
-
-7. No Terminal 2, ligar o Nó 2 ao Nó 1 usando o comando direct:
-   > d 127.0.0.1 58000
+4. Registar o nó na rede:
+   > j NET ID
    
-8. Verificar os resultados em ambos os terminais:
-   - Terminal 1 (Nó 1): Deve mostrar "[TCP] Nova ligação recebida do IP..." e guardar o prev_fd.
-   - Terminal 2 (Nó 2): Deve mostrar "[TCP] Ligação direta estabelecida..." e guardar o next_fd.
-   - Ambos os terminais devem continuar a aceitar comandos do teclado sem bloquear.
+5. Consultar nós ativos na rede:
+   > n NET
+
+--- FASE 3: CONSTRUÇÃO DA TOPOLOGIA (TCP) ---
+6. Ligar nós vizinhos para formar uma cadeia (ex: 10 <-> 20 <-> 30):
+   - No Nó 20: > ae 10  (Ligar ao 10)
+   - No Nó 30: > ae 20  (Ligar ao 20)
+
+7. Verificar vizinhos diretos:
+   > sg (show neighbours)
+   (Confirma se os FDs e IDs dos vizinhos estão corretamente registados)
+
+--- FASE 4: ENCAMINHAMENTO DINÂMICO (O CORAÇÃO DO PROJETO) ---
+8. Anunciar presença na rede:
+   No Nó 10: > a (announce)
+   
+   O que acontece: 
+   - O Nó 10 envia uma mensagem ROUTE 10 0.
+   - O Nó 20 recebe, atualiza a sua tabela (distância 1) e propaga para o Nó 30.
+   - O Nó 30 recebe, atualiza (distância 2) e propaga.
+
+9. Verificar a Tabela de Encaminhamento:
+   > sr XX (show routing para o nó XX)
+   Exemplo no Nó 30: > sr 10
+   (Esperado: Destino 10, Saltos: 2, Vizinho: [FD do Nó 20])
+
+--- FASE 5: FUNCIONALIDADES DE DEPURAÇÃO ---
+10. Monitorização de Tráfego:
+    - O código inclui logs de [DEBUG ROUTE] que mostram:
+      * De quem veio a mensagem.
+      * Qual a distância recebida vs. calculada.
+      * Se a rota foi ignorada ou propagada e porquê.
+
+--- FUNCIONALIDADES IMPLEMENTADAS ---
+* [X] Registo/Saída no servidor UDP (j, x).
+* [X] Listagem de nós da rede (n).
+* [X] Estabelecimento de ligações TCP bidirecionais (ae).
+* [X] Protocolo Distance Vector robusto (aceita mesma distância para garantir inundação).
+* [X] Encaminhamento de mensagens CHAT por múltiplos saltos (Multi-hop forwarding).
+* [X] Interface não bloqueante com select() para teclado e sockets simultâneos.
