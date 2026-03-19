@@ -361,69 +361,34 @@ int main(int argc, char *argv[]) {
                         }
                     }
                     
-                    // 2. Protocolo de Encaminhamento: ROUTE dest n
+                    // 2. Protocolo ROUTE
                     else if (strcmp(cmd, "ROUTE") == 0) {
-                        char dest_id[4];
-                        int dist_recebida;
-                        if (sscanf(buffer, "%*s %s %d", dest_id, &dist_recebida) == 2) {
-                            int nova_dist = dist_recebida + 1;
-
-                            // --- DEBUG RECEÇÃO ---
-                            printf("\n%s[DEBUG ROUTE]%s Recebi de FD %d: DEST=%s DIST_REC=%d (Nova=%d)\n", 
-                                YELLOW, RESET, current_fd, dest_id, dist_recebida, nova_dist);
-
-                            int ja_conhecia = 0;
-                            int dist_antiga = 999;
-                            int fd_antigo = -1;
+                        char dest_id[4]; int dist_rec;
+                        if (sscanf(buffer, "%*s %s %d", dest_id, &dist_rec) == 2) {
+                            int nova_dist = dist_rec + 1;
+                            int ja_conhecia = 0, dist_antiga = 999;
 
                             for (int r = 0; r < node.route_count; r++) {
                                 if (strcmp(node.routing_table[r].dest, dest_id) == 0) {
-                                    ja_conhecia = 1;
-                                    dist_antiga = node.routing_table[r].distance;
-                                    fd_antigo = node.routing_table[r].neighbor_fd;
-                                    break;
+                                    ja_conhecia = 1; dist_antiga = node.routing_table[r].distance; break;
                                 }
                             }
 
                             update_routing_table(dest_id, nova_dist, current_fd, FORWARDING);
-
-                            // --- CONDIÇÃO DE PROPAGAÇÃO ATUALIZADA ---
-                            // Propagamos se:
-                            // 1. É um destino novo (!ja_conhecia)
-                            // 2. OU a distância melhorou (nova_dist < dist_antiga)
-                            // 3. OU a distância é IGUAL mas veio do MESMO vizinho que já usávamos (Refresh/Announce)
-                            // 4. OU a distância é IGUAL mas veio de um vizinho diferente (Sincronização)
+                            int condicao_prop = (!ja_conhecia || nova_dist < dist_antiga || nova_dist == dist_antiga);
                             
-                            int mesma_distancia = (nova_dist == dist_antiga);
+                            if (node.monitoring) {
+                                printf("\n%s[MONITOR]%s RECEÇÃO: Rota %s (dist %d) via FD %d. DECISÃO: %s\n> ", 
+                                    MAGENTA, RESET, dest_id, dist_rec, current_fd, 
+                                    condicao_prop ? "PROPAGAR" : "IGNORAR");
+                                fflush(stdout);
+                            }
 
-                            int condicao_propagacao = (!ja_conhecia || nova_dist < dist_antiga || mesma_distancia);
-                            
-                            if (condicao_propagacao) {
-                                printf("[DEBUG] Condição satisfeita! (Novo: %d, Melhor: %d, MesmaDist: %d)\n", 
-                                    !ja_conhecia, (nova_dist < dist_antiga), mesma_distancia);
-                                
-                                char msg_out[64];
-                                sprintf(msg_out, "ROUTE %s %d\n", dest_id, nova_dist);
-                                
-                                int envios = 0;
+                            if (condicao_prop) {
+                                char msg_out[64]; sprintf(msg_out, "ROUTE %s %d\n", dest_id, nova_dist);
                                 for (int j = 0; j < node.neighbor_count; j++) {
-                                    // Split Horizon: Não enviar de volta para quem nos avisou
-                                    if (node.neighbors[j].fd != current_fd) {
-                                        int b = write(node.neighbors[j].fd, msg_out, strlen(msg_out));
-                                        if (b > 0) {
-                                            printf("  -> Propagado para vizinho %s (FD %d): %d bytes\n", 
-                                                node.neighbors[j].id, node.neighbors[j].fd, b);
-                                            envios++;
-                                        } else {
-                                            printf("  %s-> ERRO no write para FD %d (Wi-Fi?)%s\n", RED, node.neighbors[j].fd, RESET);
-                                        }
-                                    }
+                                    if (node.neighbors[j].fd != current_fd) write(node.neighbors[j].fd, msg_out, strlen(msg_out));
                                 }
-                                if (envios == 0) printf("  [DEBUG] Sem outros vizinhos para propagar.\n");
-                                
-                            } else {
-                                printf("[DEBUG] Rota ignorada: Já conheço %s com dist %d via FD %d e a nova info não acrescenta nada.\n", 
-                                    dest_id, dist_antiga, fd_antigo);
                             }
                         }
                     }
