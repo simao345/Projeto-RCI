@@ -210,30 +210,30 @@ int main(int argc, char *argv[]) {
                         if (strcmp(node.neighbors[i].id, arg_net) == 0) {
                             int fd_removido = node.neighbors[i].fd;
 
-                            // 1. Avisar a rede sobre todas as rotas que dependiam deste FD
+                            if (node.monitoring) {
+                                printf("\n%s[MONITOR]%s A remover vizinho %s (FD %d) e a propagar COORD...\n", MAGENTA, RESET, arg_net, fd_removido);
+                            }
+
                             for (int r = 0; r < node.route_count; r++) {
                                 if (node.routing_table[r].neighbor_fd == fd_removido) {
                                     char msg_coord[64];
                                     sprintf(msg_coord, "COORD %s\n", node.routing_table[r].dest);
                                     
-                                    // Propagamos o COORD para os OUTROS vizinhos
                                     for (int j = 0; j < node.neighbor_count; j++) {
                                         if (node.neighbors[j].fd != fd_removido) {
                                             write(node.neighbors[j].fd, msg_coord, strlen(msg_coord));
                                         }
                                     }
-                                    // Mudamos o estado para COORDINATION (invisível no sr)
                                     node.routing_table[r].state = COORDINATION;
                                 }
                             }
 
-                            // 2. Fechar o socket e remover do array de vizinhos
                             close(fd_removido);
                             for (int k = i; k < node.neighbor_count - 1; k++) {
                                 node.neighbors[k] = node.neighbors[k+1];
                             }
                             node.neighbor_count--;
-                            printf("Ligação com o nó %s removida.\n", arg_net);
+                            printf("%s[SISTEMA]%s Ligação com o nó %s removida com sucesso.\n", YELLOW, RESET, arg_net);
                             break;
                         }
                     }
@@ -253,44 +253,44 @@ int main(int argc, char *argv[]) {
                     }
                     break;
                 case 10: // sr ID
-                    // Se o utilizador não especificou um ID (arg_net vazio), 
-                    // podemos mostrar a ajuda ou a tabela geral. 
-                    // Mas focando no teu objetivo: mostrar o caminho para o ID especificado.
-                    
-                    printf("\n%s%s--- ENCAMINHAMENTO PARA NÓ %s (FROM NODE %s) ---\n", BOLD, CYAN, arg_net, node.id);
-                    printf("%-10s %-13s %-10s %-15s %s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)", RESET);
-                    printf("---------- ------------- ---------- ------------\n");
-                    
-                    // 1. O próprio nó aparece sempre como ponto de partida
-                    printf("%-10s %-15s %-10d %-15s\n", node.id, "EXPEDIÇÃO", 0, "local");
-
-                    int encontrou = 0;
-                    
-                    // 2. Se o utilizador pediu um ID que não é o próprio nó
-                    if (strcmp(arg_net, node.id) != 0) {
-                        for (int r = 0; r < node.route_count; r++) {
-                            // Filtramos pelo ID especificado E pelo estado FORWARDING (announce feito)
-                            if (strcmp(node.routing_table[r].dest, arg_net) == 0) {
-                                if (node.routing_table[r].state == FORWARDING) {
-                                    printf("%-10s %-15s %-10d %-15d\n", 
-                                        node.routing_table[r].dest, 
-                                        "EXPEDIÇÃO", 
-                                        node.routing_table[r].distance, 
-                                        node.routing_table[r].neighbor_fd);
-                                    encontrou = 1;
-                                } else {
-                                    printf("\n[INFO] O nó %s é conhecido, mas ainda não fez 'announce'.\n", arg_net);
-                                    encontrou = -1; // Encontrou mas não está ativo
-                                }
-                                break; // Encontrado o destino, não precisamos de procurar mais
-                            }
-                        }
-                    } else {
-                        encontrou = 1; // O destino era o próprio nó
+                    // 1. Verificação de argumento: Se arg_net estiver vazio, não imprime a tabela
+                    if (arg_net[0] == '\0') {
+                        printf("%s[AVISO]%s Deves indicar o ID do nó (ex: sr 10).\n", YELLOW, RESET);
+                        break;
                     }
 
-                    if (encontrou == 0 && arg_net[0] != '\0') {
-                        printf("\n[ERRO] Rota para o nó %s desconhecida.\n", arg_net);
+                    printf("\n%s%s--- ENCAMINHAMENTO PARA NÓ %s (De: %s) ---%s\n", BOLD, CYAN, arg_net, node.id, RESET);
+                    printf("%-10s %-15s %-10s %-15s\n", "DESTINO", "ESTADO", "SALTOS", "VIZINHO (FD)");
+                    printf("---------- --------------- ---------- ---------------\n");
+                    
+                    int encontrou = 0;
+
+                    // 2. Se o destino for o próprio nó, tratamos logo aqui
+                    if (strcmp(arg_net, node.id) == 0) {
+                        printf("%-10s %s%-15s%s %-10d %-15s\n", node.id, GREEN, "EXPEDIÇÃO", RESET, 0, "local");
+                        encontrou = 1;
+                    } 
+                    else {
+                        // 3. Procura apenas o ID específico na tabela
+                        for (int r = 0; r < node.route_count; r++) {
+                            if (strcmp(node.routing_table[r].dest, arg_net) == 0) {
+                                char *color = (node.routing_table[r].state == FORWARDING) ? GREEN : RED;
+                                char *state_str = (node.routing_table[r].state == FORWARDING) ? "EXPEDIÇÃO" : "COORDENAÇÃO";
+
+                                printf("%-10s %s%-15s%s %-10d %-15d\n", 
+                                    node.routing_table[r].dest, 
+                                    color, state_str, RESET,
+                                    node.routing_table[r].distance, 
+                                    node.routing_table[r].neighbor_fd);
+                                
+                                encontrou = 1;
+                                break; // Encontrou o ID pedido, pára a pesquisa imediatamente
+                            }
+                        }
+                    }
+
+                    if (!encontrou) {
+                        printf("\n%s[ERRO]%s Rota para o nó %s desconhecida.\n", RED, RESET, arg_net);
                     }
                     printf("\n");
                     break;
