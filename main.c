@@ -338,31 +338,26 @@ int main(int argc, char *argv[]) {
 
                     char cmd[32]; sscanf(buffer, "%s", cmd);
 
-                    // 1. Identificação Inicial (Apenas guarda o ID, sem criar rota)
+                    // 1. Identificação de Vizinho
                     if (strcmp(cmd, "NEIGHBOR") == 0) {
                         char neighbor_id[4];
                         if (sscanf(buffer, "%*s %s", neighbor_id) == 1) {
                             strcpy(node.neighbors[i].id, neighbor_id);
                             update_routing_table(neighbor_id, 1, current_fd, COORDINATION);
 
-                            // --- SINCRONIZAÇÃO DE BOAS-VINDAS ---
-                            // O Nó 4 percorre a sua tabela e envia ao Nó 5 tudo o que já está em FORWARDING
+                            if (node.monitoring) {
+                                printf("\n%s[MONITOR]%s SYNC: Enviando tabelas para o novo vizinho %s (FD %d)\n> ", MAGENTA, RESET, neighbor_id, current_fd);
+                            }
+
                             char sync_msg[64];
                             for (int r = 0; r < node.route_count; r++) {
                                 if (node.routing_table[r].state == FORWARDING) {
-                                    // Enviamos ROUTE dest distancia
-                                    sprintf(sync_msg, "ROUTE %s %d\n", 
-                                            node.routing_table[r].dest, 
-                                            node.routing_table[r].distance);
+                                    sprintf(sync_msg, "ROUTE %s %d\n", node.routing_table[r].dest, node.routing_table[r].distance);
                                     write(current_fd, sync_msg, strlen(sync_msg));
                                 }
                             }
-                            // ------------------------------------
-
-                            if (node.monitoring) {
-                                printf("\n%s[TCP]%s Nó %s ligado. Tabelas sincronizadas.\n> ", CYAN, RESET, neighbor_id);
-                                fflush(stdout);
-                            }
+                            printf("\n%s[TCP]%s Nó %s identificado e tabelas sincronizadas.\n> ", CYAN, RESET, neighbor_id);
+                            fflush(stdout);
                         }
                     }
                     
