@@ -67,14 +67,18 @@ int main(int argc, char *argv[]) {
             int new_fd = accept(listen_fd, NULL, NULL); 
             if (new_fd != -1) { 
                 if (node.neighbor_count < MAX_NEIGHBORS) {
-                    // Adicionamos ao array mesmo sem saber o ID ainda
                     node.neighbors[node.neighbor_count].fd = new_fd;
                     strcpy(node.neighbors[node.neighbor_count].id, "???"); 
                     node.neighbor_count++;
-                    printf("\n[TCP] Novo vizinho conectado (fd %d). Aguardando identificação...\n", new_fd);
+                    // Mensagem de sistema (Monitorização)
+                    if (node.monitoring) {
+                        printf("\n%s[MONITOR]%s Nova ligação TCP detetada (FD %d). A aguardar NEIGHBOR...\n> ", MAGENTA, RESET, new_fd);
+                        fflush(stdout);
+                    }
                 } else {
-                    printf("\n[TCP] Ligação recusada: limite de vizinhos atingido.\n");
+                    printf("\n%s[ERRO]%s Limite de vizinhos (%d) atingido. Ligação recusada.\n> ", RED, RESET, MAX_NEIGHBORS);
                     close(new_fd);
+                    fflush(stdout);
                 }
             } 
         }
@@ -145,27 +149,21 @@ int main(int argc, char *argv[]) {
                                                                                                 break;*/
                 case 6: // ADD EDGE (ae)
                     if (node.is_joined) { 
-                        // 1. PREVENÇÃO DE AUTO-LIGAÇÃO
                         if (strcmp(arg_net, node.id) == 0) {
-                            printf("%s[ERRO]%s Não podes ligar um nó a si próprio (ID %s).\n", RED, RESET, node.id);
+                            printf("%s[ERRO]%s Não podes ligar um nó a si próprio (%s).\n", RED, RESET, node.id);
                             break; 
                         }
 
-                        // 2. PREVENÇÃO DE LIGAÇÃO DUPLICADA
                         int ja_e_vizinho = 0;
                         for (int i = 0; i < node.neighbor_count; i++) {
-                            if (strcmp(node.neighbors[i].id, arg_net) == 0) {
-                                ja_e_vizinho = 1;
-                                break;
-                            }
+                            if (strcmp(node.neighbors[i].id, arg_net) == 0) { ja_e_vizinho = 1; break; }
                         }
 
                         if (ja_e_vizinho) {
-                            printf("%s[AVISO]%s Já existe uma ligação ativa com o nó %s.\n", YELLOW, RESET, arg_net);
+                            printf("%s[AVISO]%s O nó %s já é teu vizinho.\n", YELLOW, RESET, arg_net);
                             break;
                         }
 
-                        // Se passou as validações, prossegue com o contacto UDP e TCP
                         char target_ip[16]; int target_tcp; 
                         if (get_node_contact(regIP, regUDP, node.net, arg_net, target_ip, &target_tcp) == 0) { 
                             int fd = setup_tcp_client(target_ip, target_tcp); 
@@ -173,27 +171,25 @@ int main(int argc, char *argv[]) {
                                 node.neighbors[node.neighbor_count].fd = fd;
                                 strcpy(node.neighbors[node.neighbor_count].id, arg_net);
                                 node.neighbor_count++;
-
                                 update_routing_table(arg_net, 1, fd, COORDINATION);
 
                                 char msg[64]; sprintf(msg, "NEIGHBOR %s\n", node.id); 
                                 write(fd, msg, strlen(msg));
 
-                                // Sincronização de tabelas (Opcional, mas recomendado)
                                 for (int r = 0; r < node.route_count; r++) {
                                     if (node.routing_table[r].state == FORWARDING) {
                                         char sync_msg[64];
-                                        sprintf(sync_msg, "ROUTE %s %d\n", 
-                                                node.routing_table[r].dest, 
-                                                node.routing_table[r].distance);
+                                        sprintf(sync_msg, "ROUTE %s %d\n", node.routing_table[r].dest, node.routing_table[r].distance);
                                         write(fd, sync_msg, strlen(sync_msg));
                                     }
                                 }
-                                printf("%s[SUCESSO]%s Nova ligação TCP com o nó %s estabelecida.\n", GREEN, RESET, arg_net);
+                                printf("%s[SUCESSO]%s Ligação ao nó %s estabelecida (FD %d).\n", GREEN, RESET, arg_net, fd);
+                            } else {
+                                printf("%s[ERRO]%s Não foi possível abrir socket TCP para %s:%d.\n", RED, RESET, target_ip, target_tcp);
                             }
                         } 
                     } else {
-                        printf("%s[ERRO]%s Deves fazer 'join' primeiro.\n", RED, RESET);
+                        printf("%s[ERRO]%s Faz 'join' antes de tentar adicionar vizinhos.\n", RED, RESET);
                     }
                     break;
                 case 7: // SHOW NEIGHBORS (sg)
