@@ -88,50 +88,53 @@ int main(int argc, char *argv[]) {
 
             switch (cmd_type) {
                 case 1: // JOIN
-                    if (!node.is_joined && register_node(regIP, regUDP, arg_net, arg_id, node.myIP, node.myTCP) == 0) { 
-                        strcpy(node.net, arg_net);
-                        strcpy(node.id, arg_id);
-                        node.is_joined = 1;
-                        update_routing_table(node.id, 0, -1, FORWARDING);
-                    } 
+                    if (!node.is_joined) {
+                        if (register_node(regIP, regUDP, arg_net, arg_id, node.myIP, node.myTCP) == 0) { 
+                            strcpy(node.net, arg_net);
+                            strcpy(node.id, arg_id);
+                            node.is_joined = 1;
+                            update_routing_table(node.id, 0, -1, FORWARDING);
+                            printf("%s[SUCESSO]%s Registado na rede %s com ID %s\n", GREEN, RESET, node.net, node.id);
+                        } else {
+                            printf("%s[ERRO]%s Falha ao registar no servidor UDP.\n", RED, RESET);
+                        }
+                    } else {
+                        printf("%s[AVISO]%s Já estás registado na rede %s.\n", YELLOW, RESET, node.net);
+                    }
                     break; 
+
                 case 2: // LEAVE
                     if (!node.is_joined) {
-                        printf("O nó não está registado em nenhuma rede.\n");
+                        printf("%s[AVISO]%s O nó não está registado em nenhuma rede.\n", YELLOW, RESET);
                     } 
                     else {
                         if (unregister_node(regIP, regUDP, node.net, node.id) == 0) {
-
                             // fechar sockets dos vizinhos
-                            for(int i = 0; i < node.neighbor_count; i++) {
-                                close(node.neighbors[i].fd);
-                            }
+                            for(int i = 0; i < node.neighbor_count; i++) close(node.neighbors[i].fd);
 
-                            // limpar vizinhos
+                            // limpar estruturas
                             node.neighbor_count = 0;
                             memset(node.neighbors, 0, sizeof(node.neighbors));
-
-                            // limpar routing table
                             node.route_count = 0;
                             memset(node.routing_table, 0, sizeof(node.routing_table));
-
-                            // limpar estado do nó
                             memset(node.net, 0, sizeof(node.net));
                             memset(node.id, 0, sizeof(node.id));
-
                             node.is_joined = 0;
 
-                            printf("Nó saiu da rede e estado foi limpo.\n");
+                            printf("%s[SISTEMA]%s Nó saiu da rede e estado foi limpo corretamente.\n", YELLOW, RESET);
                         }
                     }
                     break;
+
                 case 3: // EXIT
                     if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id); 
+                    printf("%s[SISTEMA]%s A encerrar nó...\n", RED, RESET);
                     exit(0); 
+
                 case 4: // NODES
                     if (strlen(arg_net) > 0) nodes_query(arg_net, regIP, regUDP); 
                     else if (node.is_joined) nodes_query(node.net, regIP, regUDP); 
-                    else printf("Erro: Indica a rede ou regista-te primeiro.\n"); 
+                    else printf("%s[ERRO]%s Indica a rede (ex: nodes 039) ou regista-te primeiro.\n", RED, RESET); 
                     break; 
                                                                                             /*case 5: // DIRECT
                                                                                                 if (node.next_fd != -1) printf("Erro: Já tens ligação de saída.\n"); 
