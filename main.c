@@ -440,20 +440,22 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    // 5. Mensagens de Chat
+                    // 4. CHAT
                     else if (strcmp(cmd, "CHAT") == 0) {
                         char origem[4], destino[4], texto[512];
                         sscanf(buffer, "%*s %s %s %[^\n]", origem, destino, texto);
                         if (strcmp(destino, node.id) == 0) {
-                            printf("\n[CHAT] De %s: %s\n> ", origem, texto); fflush(stdout);
+                            printf("\n%s[CHAT]%s De %s: %s\n> ", GREEN, RESET, origem, texto); 
+                            fflush(stdout);
                         } else {
-                            // Reencaminha apenas se o estado for FORWARDING
+                            if (node.monitoring) printf("\n%s[MONITOR]%s REENCAMINHAR: Chat de %s para %s\n> ", MAGENTA, RESET, origem, destino);
                             for(int j=0; j<node.route_count; j++) {
-                                if(strcmp(node.routing_table[j].dest, destino) == 0 && node.routing_table[j].state == FORWARDING) {
+                                if(strcmp(node.routing_table[j].dest, destino) == 0 && node.routing_table[r].state == FORWARDING) {
                                     write(node.routing_table[j].neighbor_fd, buffer, n);
                                     break;
                                 }
                             }
+                            fflush(stdout);
                         }
                     }
                 }
