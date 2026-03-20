@@ -393,46 +393,22 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    // 3. Protocolo de Encaminhamento: COORD dest
-                    else if (strcmp(cmd, "COORD") == 0) {
+                    // 3. Protocolos COORD e UNCOORD (Preservando a tua lógica original)
+                    else if (strcmp(cmd, "COORD") == 0 || strcmp(cmd, "UNCOORD") == 0) {
                         char dest_id[4];
                         if (sscanf(buffer, "%*s %s", dest_id) == 1) {
                             for (int r = 0; r < node.route_count; r++) {
-                                if (strcmp(node.routing_table[r].dest, dest_id) == 0) {
-                                    // Se eu uso este vizinho para chegar ao destino, entro em coordenação
-                                    if (node.routing_table[r].neighbor_fd == current_fd) {
-                                        node.routing_table[r].state = COORDINATION;
+                                if (strcmp(node.routing_table[r].dest, dest_id) == 0 && node.routing_table[r].neighbor_fd == current_fd) {
+                                    if (cmd[0] == 'U') node.routing_table[r].distance = 99; // Lógica do UNCOORD
+                                    node.routing_table[r].state = COORDINATION;
 
-                                        // Propago o COORD para os meus outros vizinhos
-                                        for (int j = 0; j < node.neighbor_count; j++) {
-                                            if (node.neighbors[j].fd != current_fd) {
-                                                write(node.neighbors[j].fd, buffer, strlen(buffer));
-                                            }
-                                        }
+                                    if (node.monitoring) {
+                                        printf("\n%s[MONITOR]%s %s: Rota para %s via FD %d invalidada.\n> ", MAGENTA, RESET, cmd, dest_id, current_fd);
+                                        fflush(stdout);
                                     }
-                                    break;
-                                }
-                            }
-                        }
-                    }
 
-                    // 4. Protocolo de Encaminhamento: UNCOORD dest
-                    else if (strcmp(cmd, "UNCOORD") == 0) {
-                        char dest_id[4];
-                        if (sscanf(buffer, "%*s %s", dest_id) == 1) {
-                            for (int r = 0; r < node.route_count; r++) {
-                                if (strcmp(node.routing_table[r].dest, dest_id) == 0) {
-                                    if (node.routing_table[r].neighbor_fd == current_fd) {
-                                        // Removemos ou invalidamos a rota (distância infinita)
-                                        node.routing_table[r].distance = 99; 
-                                        node.routing_table[r].state = COORDINATION;
-                                        
-                                        // Propaga o UNCOORD
-                                        for (int j = 0; j < node.neighbor_count; j++) {
-                                            if (node.neighbors[j].fd != current_fd) {
-                                                write(node.neighbors[j].fd, buffer, strlen(buffer));
-                                            }
-                                        }
+                                    for (int j = 0; j < node.neighbor_count; j++) {
+                                        if (node.neighbors[j].fd != current_fd) write(node.neighbors[j].fd, buffer, strlen(buffer));
                                     }
                                     break;
                                 }
@@ -450,7 +426,7 @@ int main(int argc, char *argv[]) {
                         } else {
                             if (node.monitoring) printf("\n%s[MONITOR]%s REENCAMINHAR: Chat de %s para %s\n> ", MAGENTA, RESET, origem, destino);
                             for(int j=0; j<node.route_count; j++) {
-                                if(strcmp(node.routing_table[j].dest, destino) == 0 && node.routing_table[r].state == FORWARDING) {
+                                if(strcmp(node.routing_table[j].dest, destino) == 0 && node.routing_table[j].state == FORWARDING) {
                                     write(node.routing_table[j].neighbor_fd, buffer, n);
                                     break;
                                 }
