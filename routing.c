@@ -47,21 +47,15 @@ void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state)
     for (int i = 0; i < node.route_count; i++) {
         if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
             
-            // Regras de Ouro do Distance Vector:
-            int e_atalho = (new_dist < node.routing_table[i].distance);
-            int vem_do_mesmo_vizinho = (fd == node.routing_table[i].neighbor_fd);
-            
-            if (e_atalho || vem_do_mesmo_vizinho) {
-                node.routing_table[i].distance = new_dist;
-                node.routing_table[i].neighbor_fd = fd;
-                node.routing_table[i].state = state; // Se recebemos ROUTE, passa a FORWARDING
-            }
+            node.routing_table[i].distance = new_dist;
+            node.routing_table[i].neighbor_fd = fd;
+            node.routing_table[i].state = state; // Se recebemos ROUTE, passa a FORWARDING
             return;
         }
     }
 
     // Novo destino: inserir sempre se estiver dentro dos limites
-    if (node.route_count < 100 && new_dist < 16) {
+    if (node.route_count < 100 && (new_dist < 100 || new_dist == 99)) {
         strcpy(node.routing_table[node.route_count].dest, dest_id);
         node.routing_table[node.route_count].distance = new_dist;
         node.routing_table[node.route_count].neighbor_fd = fd;
@@ -110,9 +104,10 @@ void remove_neighbor_by_index(int index) {
         if (node.routing_table[i].neighbor_fd == fd_to_close) {
 
             node.routing_table[i].state = COORDINATION;
+            node.routing_table[i].distance = 99;
 
             char coord_msg[64];
-            sprintf(coord_msg, "COORD %s\n", node.routing_table[i].dest);
+            sprintf(coord_msg, "UNCOORD %s\n", node.routing_table[i].dest);
 
             for (int j = 0; j < node.neighbor_count; j++) {
 
