@@ -410,47 +410,81 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    // 3. Protocolos COORD e UNCOORD (Preservando a tua lógica original)
+                    // 3. Protocolos COORD e UNCOORD (VERSÃO CORRIGIDA)
                     else if (strcmp(cmd, "COORD") == 0 || strcmp(cmd, "UNCOORD") == 0) {
+
                         char dest_id[4];
+
                         if (sscanf(buffer, "%*s %s", dest_id) == 1) {
+
                             for (int r = 0; r < node.route_count; r++) {
+
                                 if (strcmp(node.routing_table[r].dest, dest_id) == 0) {
-                                    
-                                    // CONDIÇÃO CORRIGIDA: Se o erro vem de quem eu uso OU se é um UNCOORD (morte do nó)
+
+                                    // Só atua se a rota veio do vizinho correto ou é UNCOORD
                                     if (node.routing_table[r].neighbor_fd == current_fd || cmd[0] == 'U') {
-                                        
-                                        int d_nova = (cmd[0] == 'U') ? 99 : node.routing_table[r].distance;
-                                        
-                                        // Forçamos a escrita na tabela
-                                        update_routing_table(dest_id, d_nova, current_fd, COORDINATION);
 
-                                        if (node.monitoring) {
-                                            printf("\n%s[MONITOR]%s %s recebido para %s. Nova Distância: %d\n> ", 
-                                                MAGENTA, RESET, cmd, dest_id, d_nova);
-                                            fflush(stdout);
-                                        }
+                                        // 1. Marca a rota como inválida
+                                        update_routing_table(dest_id, 99, current_fd, COORDINATION);
 
-                                        // Propago o erro exatamente como recebi para os outros
-                                        for (int j = 0; j < node.neighbor_count; j++) {
-                                            if (node.neighbors[j].fd != current_fd) {
-                                                write(node.neighbors[j].fd, buffer, strlen(buffer));
+                                        // 2. Limpa outras entradas do mesmo destino
+                                        for (int i = 0; i < node.route_count; i++) {
+                                            if (strcmp(node.routing_table[i].dest, dest_id) == 0 &&
+                                                node.routing_table[i].neighbor_fd != current_fd) {
+
+                                                node.routing_table[i].state = COORDINATION;
+                                                node.routing_table[i].distance = 99;
                                             }
                                         }
-                                    } 
-                                    
-                                    // CASO B: Eu recebi um COORD, mas eu tenho uma rota VÁLIDA por outro caminho!
-                                    // Isto é o que permite ao Nó 20 "curar" o Nó 10.
-                                    else if (node.routing_table[r].state == FORWARDING && node.routing_table[r].neighbor_fd != current_fd) {
-                                        char help_msg[64];
-                                        sprintf(help_msg, "ROUTE %s %d\n", dest_id, node.routing_table[r].distance);
-                                        write(current_fd, help_msg, strlen(help_msg));
-                                        
+
                                         if (node.monitoring) {
-                                            printf("\n%s[MONITOR]%s Enviado ROUTE de auxílio para %s via FD %d\n> ", MAGENTA, RESET, dest_id, current_fd);
-                                            fflush(stdout);
+                                            printf("\n[MONITOR] Rota %s em COORD. A tentar recuperar...\n", dest_id);
+                                        }
+
+                                        // 3. Verifica se já existe alternativa válida
+                                        int tem_alternativa = 0;
+
+                                        for (int i = 0; i < node.route_count; i++) {
+                                            if (strcmp(node.routing_table[i].dest, dest_id) == 0 &&
+                                                node.routing_table[i].state == FORWARDING) {
+
+                                                tem_alternativa = 1;
+                                                break;
+                                            }
+                                        }
+
+                                        // 4. Só pede novas rotas se necessário
+                                        if (!tem_alternativa && cmd[0] == 'U') {
+                                            propagate_route_request(dest_id);
+                                        }
+
+                                        // 5. Propaga COORD apenas se esta rota depende deste vizinho
+                                        if (node.routing_table[r].neighbor_fd == current_fd) {
+
+                                            for (int j = 0; j < node.neighbor_count; j++) {
+                                                if (node.neighbors[j].fd != current_fd) {
+                                                    write(node.neighbors[j].fd, buffer, strlen(buffer));
+                                                }
+                                            }
                                         }
                                     }
+
+                                    // 6. Caso especial: tenho alternativa válida → ajudo o vizinho
+                                    else if (node.routing_table[r].state == FORWARDING &&
+                                            node.routing_table[r].neighbor_fd != current_fd) {
+
+                                        char help_msg[64];
+                                        sprintf(help_msg, "ROUTE %s %d\n",
+                                                dest_id,
+                                                node.routing_table[r].distance);
+
+                                        write(current_fd, help_msg, strlen(help_msg));
+
+                                        if (node.monitoring) {
+                                            printf("\n[MONITOR] Enviado ROUTE de auxílio para %s\n", dest_id);
+                                        }
+                                    }
+
                                     break;
                                 }
                             }

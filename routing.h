@@ -45,6 +45,7 @@ void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state)
 void update_route_state(char *dest_id, RouteState new_state);
 
 void handle_uncoord(char *dest_id, int fd);
+void propagate_route_request(char *dest_id);
 
 /* neighbor management */
 void remove_neighbor_by_index(int index);

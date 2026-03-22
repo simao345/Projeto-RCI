@@ -19,6 +19,8 @@ void add_route(char *dest_id, int fd) {
     if (node.route_count < MAX_ROUTES) {
         strcpy(node.routing_table[node.route_count].dest, dest_id);
         node.routing_table[node.route_count].neighbor_fd = fd;
+        node.routing_table[node.route_count].distance = 99;
+        node.routing_table[node.route_count].state = COORDINATION;
         node.route_count++;
     }
 }
@@ -42,24 +44,34 @@ void clean_routing_table_by_fd(int fd) {
 
 /* update routing table entry */
 void update_routing_table(char *dest_id, int new_dist, int fd, RouteState state) {
+
     if (strcmp(dest_id, node.id) == 0) return;
 
+    if (new_dist >= 99) return;  // bloqueia valores inválidos
+
     for (int i = 0; i < node.route_count; i++) {
+
         if (strcmp(node.routing_table[i].dest, dest_id) == 0) {
-            
-            node.routing_table[i].distance = new_dist;
-            node.routing_table[i].neighbor_fd = fd;
-            node.routing_table[i].state = state; // Se recebemos ROUTE, passa a FORWARDING
+
+            if (new_dist < node.routing_table[i].distance ||
+                node.routing_table[i].state == COORDINATION) {
+
+                node.routing_table[i].distance = new_dist;
+                node.routing_table[i].neighbor_fd = fd;
+                node.routing_table[i].state = FORWARDING;
+            }
+
             return;
         }
     }
 
-    // Novo destino: inserir sempre se estiver dentro dos limites
-    if (node.route_count < 100 && (new_dist < 100 || new_dist == 99)) {
+    if (node.route_count < MAX_ROUTES) {
+
         strcpy(node.routing_table[node.route_count].dest, dest_id);
         node.routing_table[node.route_count].distance = new_dist;
         node.routing_table[node.route_count].neighbor_fd = fd;
-        node.routing_table[node.route_count].state = state;
+        node.routing_table[node.route_count].state = FORWARDING;
+
         node.route_count++;
     }
 }
@@ -83,7 +95,8 @@ void handle_uncoord(char *dest_id, int fd) {
         if (strcmp(node.routing_table[i].dest, dest_id) == 0 &&
             node.routing_table[i].neighbor_fd == fd) {
 
-            node.routing_table[i].state = COORDINATION;
+            node.routing_table[i].state = FORWARDING;
+            node.routing_table[i].distance = 99;
         }
     }
 }
@@ -127,4 +140,17 @@ void remove_neighbor_by_index(int index) {
     }
 
     node.neighbor_count--;
+}
+
+/* propagate route request */
+void propagate_route_request(char *dest_id) {
+
+    if (strcmp(dest_id, node.id) == 0) return;
+
+    char msg[64];
+    sprintf(msg, "ROUTE %s 99\n", dest_id);
+
+    for (int i = 0; i < node.neighbor_count; i++) {
+        write(node.neighbors[i].fd, msg, strlen(msg));
+    }
 }
