@@ -36,7 +36,8 @@ mesmo que não estejam diretamente ligados.
 8. Anunciar presença na rede:
    No Nó 10: > a (announce)
    
-   O que acontece: 
+   O que acontece: amento de mensagens CHAT por múltiplos saltos (Multi-hop forwarding).
+* [X] Interface não bloqueante com select() para teclado e sockets simultâneos.
    - O Nó 10 envia uma mensagem ROUTE 10 0.
    - O Nó 20 recebe, atualiza a sua tabela (distância 1) e propaga para o Nó 30.
    - O Nó 30 recebe, atualiza (distância 2) e propaga.
@@ -60,3 +61,18 @@ mesmo que não estejam diretamente ligados.
 * [X] Protocolo Distance Vector robusto (aceita mesma distância para garantir inundação).
 * [X] Encaminhamento de mensagens CHAT por múltiplos saltos (Multi-hop forwarding).
 * [X] Interface não bloqueante com select() para teclado e sockets simultâneos.
+
+**Problemas com COORDENAÇÃO**
+- **AE provoca um "mini announce":** No `main.c`, o comando `ae` chama `update_routing_table(arg_net, 1, fd, COORDINATION)` e depois envia imediatamente as entradas `ROUTE` ao novo vizinho, que expoe as rotas prematuramente (ver [main.c](main.c)).
+- **Handshake `NEIGHBOR` também sincroniza rotas:** Ao receber `NEIGHBOR`, o nó chama `update_routing_table(neighbor_id, 1, current_fd, FORWARDING)` e envia em seguida as suas rotas (`ROUTE`), o que pode duplicar ou revelar rotas antes do esperado (ver [main.c](main.c)).
+- **Inconsistência entre `COORD` e `UNCOORD`:** O `main.c` envia `COORD <id>` ao remover uma ligação, enquanto `routing.c` em `remove_neighbor_by_index` constrói e envia `UNCOORD <id>` — o uso de tokens diferentes pode provocar tratamento incoerente (ver [main.c](main.c) e [routing.c](routing.c)).
+- **Tratamento conflituoso da distância `99`:** Em `routing.c`, `update_routing_table` ignora (`return`) qualquer `new_dist >= 99`, logo tentativas de definir distância `99` via `update_routing_table` são descartadas, criando inconsistências ao forçar estados de coordenação (ver [routing.c](routing.c) e [routing.h](routing.h)).
+- **`propagate_route_request` ignorado pelo guard:** `propagate_route_request` envia `ROUTE <id> 99`, mas como `update_routing_table` ignora distâncias >=99, pedidos de rota com 99 não atualizam a tabela — isto pode quebrar a lógica de recuperação (ver [routing.c](routing.c)).
+- **Sincronização de tabela demasiado permissiva:** O código envia todas as rotas em estado `FORWARDING` a um novo vizinho durante `ae` e novamente quando chega `NEIGHBOR`, o que pode mesclar mapas inesperadamente; é recomendável consolidar onde e quando ocorre o sync completo (ver [main.c](main.c)).
+
+**Outros problemas detectados**
+- **Propagação de tabela de expedição por ligação nova não condicionada:** A partilha de rotas no `ae` faz-se sem verificar se ambos os lados têm tabela inicial válida, contrariando o comportamento desejado descrito no documento (ver [main.c](main.c)).
+- **Possível fuga de lógica ao forçar coordenação e depois adicionar nós:** Forçar `distance=99` e depois associar novos nós pode deixar o sistema em estados estranhos (ver [routing.c](routing.c)).
+- **Stack overflow:** Há relatos/observações que stack overflow pode causar falhas completas — exige validação de buffers e limites (ver [main.c](main.c) e [routing.c](routing.c)).
+
+Estas observações correspondem às notas originais em "Problemas com COORDINATION" e indicam locais concretos no código para investigação e correção.
