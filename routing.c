@@ -96,15 +96,40 @@ static void check_coord_complete(Route *r) {
         printf("\n%s[MONITOR]%s COORD complete for dest %s. dist=%d succ_fd=%d\n> ",
                MAGENTA, RESET, r->dest, r->distance, r->succ_fd);
 
-    /* Advertise new distance (if reachable) */
-    if (r->distance < INF)
+    int succ_coord_fd = r->succ_coord_fd;
+    r->succ_coord_fd  = -1;
+
+    if (r->distance < INF) {
+        /* Found an alternative: advertise it */
         send_route_to_all(r);
+    } else {
+        /*
+         * No alternative found: remove the entry entirely so sr/chat
+         * correctly report "no route", then notify upstream.
+         */
+        char dest_copy[4];
+        strncpy(dest_copy, r->dest, 4);
+
+        /* Compact the routing table: remove this entry */
+        int idx = (int)(r - node.routing_table);
+        for (int k = idx; k < node.route_count - 1; k++)
+            node.routing_table[k] = node.routing_table[k + 1];
+        node.route_count--;
+        r = NULL;   /* pointer now invalid */
+
+        if (node.monitoring)
+            printf("\n%s[MONITOR]%s Route to %s removed (unreachable).\n> ",
+                   MAGENTA, RESET, dest_copy);
+
+        /* Notify the neighbour that triggered coordination */
+        if (succ_coord_fd != -1)
+            send_uncoord(dest_copy, succ_coord_fd);
+        return;
+    }
 
     /* Notify the neighbour that triggered coordination */
-    if (r->succ_coord_fd != -1)
-        send_uncoord(r->dest, r->succ_coord_fd);
-
-    r->succ_coord_fd = -1;
+    if (succ_coord_fd != -1)
+        send_uncoord(r->dest, succ_coord_fd);
 }
 
 /* ------------------------------------------------------------------ */
