@@ -20,22 +20,6 @@ Route *find_route(const char *dest) {
     return NULL;
 }
 
-Route *find_or_create_route(const char *dest) {
-    Route *r = find_route(dest);
-    if (r) return r;
-    if (node.route_count >= MAX_ROUTES) return NULL;
-
-    r = &node.routing_table[node.route_count++];
-    memset(r, 0, sizeof(*r));
-    strncpy(r->dest, dest, 3);
-    r->dest[3]        = '\0';
-    r->distance       = INF;
-    r->succ_fd        = -1;
-    r->state          = FORWARDING;
-    r->succ_coord_fd  = -1;
-    return r;
-}
-
 /* index of neighbour with this fd (-1 if not found) */
 static int nbr_index_by_fd(int fd) {
     for (int i = 0; i < node.neighbor_count; i++)
@@ -89,7 +73,22 @@ static void check_coord_complete(Route *r) {
     for (int k = 0; k < node.neighbor_count; k++)
         if (r->coord_pending[k]) return;   /* still waiting */
 
-    /* All neighbours have replied → return to FORWARDING */
+    /*
+     * All neighbours have replied. Only leave COORDINATION if we actually
+     * found an alternative route. If dist is still INF, stay in COORDINATION
+     * — a spontaneous ROUTE from a future edge will resolve it via handle_route.
+     */
+    if (r->distance >= INF) {
+        if (node.monitoring)
+            printf("\n%s[MONITOR]%s COORD round complete for dest %s but no route found — staying in COORDINATION\n> ",
+                   MAGENTA, RESET, r->dest);
+        /* Reset all coord_pending to 0 so the next check_coord_complete call
+           (triggered by a new UNCOORD) doesn't re-enter this block uselessly.
+           They are already 0 since we just checked, nothing to do. */
+        return;
+    }
+
+    /* Found a route — return to FORWARDING */
     r->state = FORWARDING;
 
     if (node.monitoring)
@@ -99,35 +98,9 @@ static void check_coord_complete(Route *r) {
     int succ_coord_fd = r->succ_coord_fd;
     r->succ_coord_fd  = -1;
 
-    if (r->distance < INF) {
-        /* Found an alternative: advertise it */
+    if (r->distance < INF)
         send_route_to_all(r);
-    } else {
-        /*
-         * No alternative found: remove the entry entirely so sr/chat
-         * correctly report "no route", then notify upstream.
-         */
-        char dest_copy[4];
-        strncpy(dest_copy, r->dest, 4);
 
-        /* Compact the routing table: remove this entry */
-        int idx = (int)(r - node.routing_table);
-        for (int k = idx; k < node.route_count - 1; k++)
-            node.routing_table[k] = node.routing_table[k + 1];
-        node.route_count--;
-        r = NULL;   /* pointer now invalid */
-
-        if (node.monitoring)
-            printf("\n%s[MONITOR]%s Route to %s removed (unreachable).\n> ",
-                   MAGENTA, RESET, dest_copy);
-
-        /* Notify the neighbour that triggered coordination */
-        if (succ_coord_fd != -1)
-            send_uncoord(dest_copy, succ_coord_fd);
-        return;
-    }
-
-    /* Notify the neighbour that triggered coordination */
     if (succ_coord_fd != -1)
         send_uncoord(r->dest, succ_coord_fd);
 }
@@ -149,13 +122,35 @@ void on_edge_added(int slot) {
         if (rt->state == FORWARDING && rt->distance < INF) {
             /* Tell the new neighbour what we know */
             send_route_to_fd(rt, fd);
+        } else if (rt->state == COORDINATION) {
+            /*
+             * We are searching for a route to this dest.
+             * Ask the new neighbour — if it knows the route it will reply
+             * with ROUTE + UNCOORD (spec §2.3 rule 2), which handle_coord
+             * and handle_uncoord will process normally.
+             * coord_pending[slot] stays 0: we are not depending on this
+             * neighbour to complete our coordination round, so if it replies
+             * with UNCOORD we don't need to wait for anyone else.
+             */
+            send_coord(rt->dest, fd);
+        } else if (rt->state == FORWARDING && rt->distance >= INF) {
+            /* Não sabemos rota → entrar em COORDINATION */
+            rt->state         = COORDINATION;
+            rt->succ_coord_fd = -1;
+            rt->distance      = INF;
+            rt->succ_fd       = -1;
+
+            memset(rt->coord_pending, 0, sizeof(rt->coord_pending));
+
+            for (int k = 0; k < node.neighbor_count; k++) {
+                send_coord(rt->dest, node.neighbors[k].fd);
+                rt->coord_pending[k] = 1;
+            }
+
+            if (node.monitoring)
+                printf("\n%s[MONITOR]%s Entered COORDINATION for dest %s (no route on new edge)\n> ",
+                    MAGENTA, RESET, rt->dest);
         }
-        /*
-         * If we are in COORDINATION for this dest: the new neighbour
-         * hasn't been asked to coordinate, so coord_pending[slot] = 0
-         * (already 0 since we just added the slot and it was 0-filled).
-         * Nothing extra to do.
-         */
     }
 }
 
@@ -198,16 +193,28 @@ void on_edge_removed(int idx) {
                 printf("\n%s[MONITOR]%s Entered COORDINATION for dest %s (link failure)\n> ",
                        MAGENTA, RESET, rt->dest);
 
-            /* If we have no other neighbours, coordination is immediately done */
-            check_coord_complete(rt);
+            /* Only check completion if we sent COORD to at least one neighbour.
+               With no other neighbours, stay in COORDINATION until a new edge
+               is added and a ROUTE arrives. */
+            {
+                int sent_any = 0;
+                for (int k = 0; k < node.neighbor_count; k++)
+                    if (rt->coord_pending[k]) { sent_any = 1; break; }
+                if (sent_any) check_coord_complete(rt);
+            }
 
         } else if (rt->state == COORDINATION) {
             /*
              * spec §2.5: if already in COORDINATION, the removed neighbour
              * no longer matters → mark coord_pending[idx] = 0 and re-check.
+             * But only re-check if we were actually waiting on this neighbour —
+             * otherwise check_coord_complete sees all zeros and wrongly exits
+             * COORDINATION for routes that never sent COORD to anyone.
              */
-            rt->coord_pending[idx] = 0;
-            check_coord_complete(rt);
+            if (rt->coord_pending[idx]) {
+                rt->coord_pending[idx] = 0;
+                check_coord_complete(rt);
+            }
         }
     }
 
@@ -245,17 +252,21 @@ void handle_route(const char *dest, int n, int nbr_index) {
         r->succ_fd  = fd;
 
         if (r->state == FORWARDING) {
-            /* Advertise to all neighbours */
             send_route_to_all(r);
+        } else {
+            /*
+             * In COORDINATION: check if this neighbour was part of the
+             * coordination round (coord_pending[nbr_index] == 1).
+             * If not, it means this is a spontaneous ROUTE (e.g. from a
+             * newly added edge) — clear all pending flags and let
+             * check_coord_complete resolve immediately.
+             */
+            if (!r->coord_pending[nbr_index]) {
+                memset(r->coord_pending, 0, sizeof(r->coord_pending));
+            }
+            check_coord_complete(r);
         }
-        /* If in COORDINATION: just store the better distance; will advertise
-           when we return to FORWARDING (check_coord_complete). */
     }
-    /*
-     * If candidate >= dist[t] → spec says ignore.
-     * Exception handled in handle_coord: when we are NOT the succ,
-     * we reply with our own ROUTE + UNCOORD.  That case is handled there.
-     */
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,8 +279,17 @@ void handle_coord(const char *dest, int nbr_index) {
     if (!r) return;
 
     if (r->state == COORDINATION) {
-        /* spec §2.3 rule 1: already in coordination → reply UNCOORD immediately */
+        /*
+         * spec §2.3 rule 1: already in coordination → reply UNCOORD immediately.
+         * Additionally, if we had sent COORD to this neighbour (coord_pending=1),
+         * their reply with COORD means they are also in coordination — they will
+         * never send us an UNCOORD, so we mark our pending for them as done.
+         */
         send_uncoord(dest, fd);
+        if (r->coord_pending[nbr_index]) {
+            r->coord_pending[nbr_index] = 0;
+            check_coord_complete(r);
+        }
         return;
     }
 
@@ -278,12 +298,23 @@ void handle_coord(const char *dest, int nbr_index) {
     if (r->succ_fd != fd) {
         /*
          * spec §2.3 rule 2: j ≠ succ[t]
-         * Reply with our current distance and UNCOORD.
+         * Only reply with our route if it does NOT go back through j.
+         * If succ[t] == fd it means our route passes through the sender —
+         * offering it would create a forwarding cycle.  In that case fall
+         * through to rule 3 and enter COORDINATION instead.
          */
-        if (r->distance < INF)
+        if (r->distance < INF && r->succ_fd != fd) {
             send_route_to_fd(r, fd);
-        send_uncoord(dest, fd);
-        return;
+            send_uncoord(dest, fd);
+            return;
+        }
+        if (r->distance >= INF) {
+            /* We have no route at all — just send UNCOORD */
+            send_uncoord(dest, fd);
+            return;
+        }
+        /* r->succ_fd == fd: our only route goes back through j → fall through
+           to COORDINATION (same as rule 3) */
     }
 
     /*
@@ -327,4 +358,37 @@ void handle_uncoord(const char *dest, int nbr_index) {
 
     /* spec §2.4 rule 2: if all coord[t,k] == 0 → leave COORDINATION */
     check_coord_complete(r);
+}
+
+Route *find_or_create_route(const char *dest) {
+    Route *r = find_route(dest);
+    if (r) return r;
+    if (node.route_count >= MAX_ROUTES) return NULL;
+
+    r = &node.routing_table[node.route_count++];
+    memset(r, 0, sizeof(*r));
+
+    strncpy(r->dest, dest, 3);
+    r->dest[3] = '\0';
+
+    r->distance      = INF;
+    r->succ_fd       = -1;
+
+    /*começar em COORDINATION */
+    r->state         = COORDINATION;
+    r->succ_coord_fd = -1;
+
+    memset(r->coord_pending, 0, sizeof(r->coord_pending));
+
+    /*enviar COORD para todos os vizinhos */
+    for (int k = 0; k < node.neighbor_count; k++) {
+        send_coord(r->dest, node.neighbors[k].fd);
+        r->coord_pending[k] = 1;
+    }
+
+    if (node.monitoring)
+        printf("\n%s[MONITOR]%s New route %s → entered COORDINATION\n> ",
+               MAGENTA, RESET, r->dest);
+
+    return r;
 }

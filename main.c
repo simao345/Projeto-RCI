@@ -264,14 +264,12 @@ int main(int argc, char *argv[]) {
                     Route *r = find_route(arg_net);
                     if (!r) {
                         printf("\n%s[ERRO]%s No route to %s.\n\n", RED, RESET, arg_net);
+                    } else if (r->state == FORWARDING) {
+                        printf("\n  dest=%-4s  state=%sFORWARDING%s  dist=%d  succ_fd=%d\n\n",
+                               r->dest, GREEN, RESET, r->distance, r->succ_fd);
                     } else {
-                        const char *st = (r->state == FORWARDING) ? "FORWARDING" : "COORDINATION";
-                        if (r->state == FORWARDING)
-                            printf("\n  dest=%-4s  state=%s%s%s  dist=%d  succ_fd=%d\n\n",
-                                   r->dest, GREEN, st, RESET, r->distance, r->succ_fd);
-                        else
-                            printf("\n  dest=%-4s  state=%s%s%s  (no valid route)\n\n",
-                                   r->dest, RED, st, RESET);
+                        printf("\n  dest=%-4s  state=%sCOORDINATION%s  dist=%d  succ_fd=%d\n\n",
+                               r->dest, YELLOW, RESET, r->distance, r->succ_fd);
                     }
                 }
                 break;
