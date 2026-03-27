@@ -302,7 +302,72 @@ int main(int argc, char *argv[]) {
                 }
                 break;
 
-            /* dj / dae (direct join / direct add edge) could go here */
+            /* dj / dae (direct join / direct add edge) */
+
+            case 14: /* direct join (dj) net id */
+                if (node.is_joined) {
+                    printf("%s[AVISO]%s Already joined net %s.\n", YELLOW, RESET, node.net);
+                    break;
+                }
+                strcpy(node.net, arg_net);
+                strcpy(node.id,  arg_id);
+                node.is_joined = 1;
+                printf("%s[OK]%s Joined net %s with id %s (no server registration).\n",
+                       GREEN, RESET, node.net, node.id);
+                break;
+
+            case 15: /* direct add edge (dae) id idIP idTCP */
+                if (!node.is_joined) {
+                    printf("%s[ERRO]%s Join first.\n", RED, RESET);
+                    break;
+                }
+                {
+                    /* arg_net = id, arg_id = "idIP idTCP" */
+                    char dae_ip[16] = {0}; int dae_tcp = 0;
+                    if (sscanf(arg_id, "%15s %d", dae_ip, &dae_tcp) != 2) {
+                        printf("%s[ERRO]%s Usage: dae <id> <IP> <TCP>\n", RED, RESET);
+                        break;
+                    }
+                    if (strcmp(arg_net, node.id) == 0) {
+                        printf("%s[ERRO]%s Cannot connect to self.\n", RED, RESET);
+                        break;
+                    }
+                    int already = 0;
+                    for (int i = 0; i < node.neighbor_count; i++)
+                        if (strcmp(node.neighbors[i].id, arg_net) == 0) { already = 1; break; }
+                    if (already) {
+                        printf("%s[AVISO]%s Node %s is already a neighbour.\n",
+                               YELLOW, RESET, arg_net);
+                        break;
+                    }
+                    if (node.neighbor_count >= MAX_NEIGHBORS) {
+                        printf("%s[ERRO]%s Neighbour limit reached.\n", RED, RESET);
+                        break;
+                    }
+
+                    int fd = setup_tcp_client(dae_ip, dae_tcp);
+                    if (fd == -1) {
+                        printf("%s[ERRO]%s TCP connection to %s:%d failed.\n",
+                               RED, RESET, dae_ip, dae_tcp);
+                        break;
+                    }
+
+                    int slot = node.neighbor_count;
+                    node.neighbors[slot].fd = fd;
+                    strncpy(node.neighbors[slot].id, arg_net, 3);
+                    node.neighbors[slot].id[3] = '\0';
+                    node.neighbor_count++;
+
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "NEIGHBOR %s\n", node.id);
+                    write(fd, msg, strlen(msg));
+
+                    on_edge_added(slot);
+
+                    printf("%s[OK]%s Direct edge to %s (%s:%d) established (fd %d).\n",
+                           GREEN, RESET, arg_net, dae_ip, dae_tcp, fd);
+                }
+                break;
 
             default:
                 break;

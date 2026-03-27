@@ -36,11 +36,6 @@ Route *find_or_create_route(const char *dest) {
     return r;
 }
 
-static int nbr_index_by_fd(int fd) {
-    for (int i = 0; i < node.neighbor_count; i++)
-        if (node.neighbors[i].fd == fd) return i;
-    return -1;
-}
 
 void send_route_to_fd(Route *r, int fd) {
     if (r->distance >= INF) return;
