@@ -121,11 +121,14 @@ int main(int argc, char *argv[]) {
                 if (!node.is_joined) {
                     printf("%s[AVISO]%s Not joined.\n", YELLOW, RESET);
                 } else {
-                    /* Remove all edges gracefully */
-                    while (node.neighbor_count > 0)
-                        on_edge_removed(0);
+                    /* Close all sockets directly — no point triggering
+                       coordination waves we will never complete */
+                    for (int i = 0; i < node.neighbor_count; i++)
+                        close(node.neighbors[i].fd);
 
                     unregister_node(regIP, regUDP, node.net, node.id);
+                    node.neighbor_count = 0;
+                    memset(node.neighbors, 0, sizeof(node.neighbors));
                     node.route_count = 0;
                     memset(node.routing_table, 0, sizeof(node.routing_table));
                     memset(node.net, 0, sizeof(node.net));
