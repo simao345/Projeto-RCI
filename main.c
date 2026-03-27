@@ -23,6 +23,7 @@ int   regUDP;
 
 void sigint_handler(int sig) {
     (void)sig;
+    /* Remove o registo no servidor de nós antes de terminar */
     if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id);
     exit(0);
 }
@@ -31,7 +32,7 @@ void sigint_handler(int sig) {
 int main(int argc, char *argv[]) {
     signal(SIGINT, sigint_handler);
 
-    if (argc < 3 || argc > 5) { fprintf(stderr, "Usage: OWR IP TCP [regIP [regUDP]]\n"); exit(1); }
+    if (argc < 3 || argc > 5) { fprintf(stderr, "Uso: OWR IP TCP [regIP [regUDP]]\n"); exit(1); }
 
     memset(&node, 0, sizeof(node));
     node.neighbor_count = 0;
@@ -63,7 +64,7 @@ int main(int argc, char *argv[]) {
 
         if (select(max_fd + 1, &rfds, NULL, NULL, NULL) < 0) continue;
 
-        /* ---- New TCP connections ---- */
+        /* ---- Novas ligações TCP de entrada ---- */
         if (FD_ISSET(listen_fd, &rfds)) {
             int new_fd = accept(listen_fd, NULL, NULL);
             if (new_fd != -1) {
@@ -73,17 +74,17 @@ int main(int argc, char *argv[]) {
                     strcpy(node.neighbors[slot].id, "???");
                     node.neighbor_count++;
                     /*
-                     * Do NOT call on_edge_added yet: we don't know their id
-                     * and we haven't exchanged NEIGHBOR.  We wait for the
-                     * incoming NEIGHBOR message before syncing routes.
+                     * on_edge_added não é invocado ainda: o identificador do
+                     * vizinho é desconhecido até à recepção da mensagem NEIGHBOR.
+                     * A sincronização de rotas fica suspensa até esse momento.
                      */
                     if (node.monitoring) {
-                        printf("\n%s[MONITOR]%s New TCP connection (fd %d). Waiting for NEIGHBOR...\n> ",
+                        printf("\n%s[MONITOR]%s Nova ligação TCP (fd %d). À espera de NEIGHBOR...\n> ",
                                MAGENTA, RESET, new_fd);
                         fflush(stdout);
                     }
                 } else {
-                    printf("\n%s[ERRO]%s Neighbour limit (%d) reached. Closing new connection.\n> ",
+                    printf("\n%s[ERRO]%s Limite de vizinhos (%d) atingido. Ligação recusada.\n> ",
                            RED, RESET, MAX_NEIGHBORS);
                     close(new_fd);
                     fflush(stdout);
@@ -91,7 +92,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* ---- User input ---- */
+        /* ---- Comandos do utilizador ---- */
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             char buf[BUFFER_SIZE], arg_net[20], arg_id[512];
             if (fgets(buf, BUFFER_SIZE, stdin) == NULL) break;
@@ -100,29 +101,33 @@ int main(int argc, char *argv[]) {
 
             switch (cmd) {
 
-            case 1: /* join */
+            case 1: /* join — adesão à rede com registo no servidor de nós */
                 if (!node.is_joined) {
                     if (register_node(regIP, regUDP, arg_net, arg_id,
                                       node.myIP, node.myTCP) == 0) {
                         strcpy(node.net, arg_net);
                         strcpy(node.id,  arg_id);
                         node.is_joined = 1;
-                        printf("%s[OK]%s Registered on net %s with id %s\n",
+                        printf("%s[OK]%s Registado na rede %s com id %s\n",
                                GREEN, RESET, node.net, node.id);
                     } else {
-                        printf("%s[ERRO]%s Registration failed.\n", RED, RESET);
+                        printf("%s[ERRO]%s Falha no registo no servidor de nós.\n", RED, RESET);
                     }
                 } else {
-                    printf("%s[AVISO]%s Already joined net %s.\n", YELLOW, RESET, node.net);
+                    printf("%s[AVISO]%s Já pertence à rede %s.\n", YELLOW, RESET, node.net);
                 }
                 break;
 
-            case 2: /* leave */
+            case 2: /* leave — saída da rede */
                 if (!node.is_joined) {
-                    printf("%s[AVISO]%s Not joined.\n", YELLOW, RESET);
+                    printf("%s[AVISO]%s O nó não pertence a nenhuma rede.\n", YELLOW, RESET);
                 } else {
-                    /* Close all sockets directly — no point triggering
-                       coordination waves we will never complete */
+                    /*
+                     * Fecha todos os sockets directamente — não faz sentido
+                     * desencadear rondas de coordenação que nunca serão concluídas.
+                     * Os vizinhos detectam o fecho via read() com retorno ≤ 0
+                     * e tratam a situação com on_edge_removed do seu lado.
+                     */
                     for (int i = 0; i < node.neighbor_count; i++)
                         close(node.neighbors[i].fd);
 
@@ -134,31 +139,31 @@ int main(int argc, char *argv[]) {
                     memset(node.net, 0, sizeof(node.net));
                     memset(node.id,  0, sizeof(node.id));
                     node.is_joined = 0;
-                    printf("%s[OK]%s Left the network.\n", YELLOW, RESET);
+                    printf("%s[OK]%s Nó removido da rede.\n", YELLOW, RESET);
                 }
                 break;
 
-            case 3: /* exit */
+            case 3: /* exit — encerramento da aplicação */
                 if (node.is_joined) unregister_node(regIP, regUDP, node.net, node.id);
-                printf("%s[SISTEMA]%s Shutting down.\n", RED, RESET);
+                printf("%s[SISTEMA]%s A encerrar.\n", RED, RESET);
                 exit(0);
 
-            case 4: /* nodes */
+            case 4: /* nodes — lista os nós da rede */
                 if (strlen(arg_net) > 0)
                     nodes_query(arg_net, regIP, regUDP);
                 else if (node.is_joined)
                     nodes_query(node.net, regIP, regUDP);
                 else
-                    printf("%s[ERRO]%s Specify net or join first.\n", RED, RESET);
+                    printf("%s[ERRO]%s Indique a rede ou execute join primeiro.\n", RED, RESET);
                 break;
 
-            case 6: /* add edge (ae) */
+            case 6: /* ae — estabelece edge com o nó indicado */
                 if (!node.is_joined) {
-                    printf("%s[ERRO]%s Join first.\n", RED, RESET);
+                    printf("%s[ERRO]%s Execute join primeiro.\n", RED, RESET);
                     break;
                 }
                 if (strcmp(arg_net, node.id) == 0) {
-                    printf("%s[ERRO]%s Cannot connect to self.\n", RED, RESET);
+                    printf("%s[ERRO]%s Não é possível ligar o nó a si próprio.\n", RED, RESET);
                     break;
                 }
                 {
@@ -166,22 +171,21 @@ int main(int argc, char *argv[]) {
                     for (int i = 0; i < node.neighbor_count; i++)
                         if (strcmp(node.neighbors[i].id, arg_net) == 0) { already = 1; break; }
                     if (already) {
-                        printf("%s[AVISO]%s Node %s is already a neighbour.\n",
-                               YELLOW, RESET, arg_net);
+                        printf("%s[AVISO]%s O nó %s já é vizinho.\n", YELLOW, RESET, arg_net);
                         break;
                     }
 
                     char target_ip[16]; int target_tcp;
                     if (get_node_contact(regIP, regUDP, node.net, arg_net,
                                          target_ip, &target_tcp) != 0) {
-                        printf("%s[ERRO]%s Could not resolve contact for %s.\n",
+                        printf("%s[ERRO]%s Não foi possível obter o contacto do nó %s.\n",
                                RED, RESET, arg_net);
                         break;
                     }
 
                     int fd = setup_tcp_client(target_ip, target_tcp);
                     if (fd == -1) {
-                        printf("%s[ERRO]%s TCP connection to %s:%d failed.\n",
+                        printf("%s[ERRO]%s Falha na ligação TCP a %s:%d.\n",
                                RED, RESET, target_ip, target_tcp);
                         break;
                     }
@@ -192,73 +196,73 @@ int main(int argc, char *argv[]) {
                     node.neighbors[slot].id[3] = '\0';
                     node.neighbor_count++;
 
-                    /* Send our identity first */
+                    /* Envia o identificador local antes de sincronizar rotas */
                     char msg[64];
                     snprintf(msg, sizeof(msg), "NEIGHBOR %s\n", node.id);
                     write(fd, msg, strlen(msg));
 
-                    /* Sync our forwarding routes to the new neighbour */
+                    /* Sincroniza as rotas de expedição com o novo vizinho */
                     on_edge_added(slot);
 
-                    printf("%s[OK]%s Edge to %s established (fd %d).\n",
+                    printf("%s[OK]%s Edge com %s estabelecido (fd %d).\n",
                            GREEN, RESET, arg_net, fd);
                 }
                 break;
 
-            case 7: /* show neighbors (sg) */
-                printf("\n%s--- Neighbours of node %s ---%s\n", MAGENTA, node.id, RESET);
+            case 7: /* sg — apresenta a lista de vizinhos */
+                printf("\n%s--- Vizinhos do nó %s ---%s\n", MAGENTA, node.id, RESET);
                 for (int i = 0; i < node.neighbor_count; i++)
                     printf("  id=%-4s  fd=%d\n",
                            node.neighbors[i].id, node.neighbors[i].fd);
                 printf("\n");
                 break;
 
-            case 8: /* remove edge (re) */
+            case 8: /* re — remove edge com o nó indicado */
                 {
                     int found = -1;
                     for (int i = 0; i < node.neighbor_count; i++)
                         if (strcmp(node.neighbors[i].id, arg_net) == 0) { found = i; break; }
                     if (found == -1) {
-                        printf("%s[ERRO]%s No neighbour with id %s.\n", RED, RESET, arg_net);
+                        printf("%s[ERRO]%s Nenhum vizinho com id %s.\n", RED, RESET, arg_net);
                     } else {
                         on_edge_removed(found);
-                        printf("%s[OK]%s Edge to %s removed.\n", YELLOW, RESET, arg_net);
+                        printf("%s[OK]%s Edge com %s removido.\n", YELLOW, RESET, arg_net);
                     }
                 }
                 break;
 
-            case 9: /* announce */
+            case 9: /* announce — anuncia o nó na rede sobreposta */
                 if (!node.is_joined) {
-                    printf("%s[ERRO]%s Join first.\n", RED, RESET);
+                    printf("%s[ERRO]%s Execute join primeiro.\n", RED, RESET);
                     break;
                 }
                 {
                     /*
-                     * Create/reset our own route entry with distance 0.
-                     * Then broadcast ROUTE <id> 0 to every neighbour.
+                     * Cria ou repõe a entrada do próprio nó com distância 0.
+                     * send_route_to_all ignora distâncias >= INF, pelo que a
+                     * mensagem ROUTE é construída e enviada directamente.
                      */
                     Route *r = find_or_create_route(node.id);
                     if (r) {
                         r->distance = 0;
-                        r->succ_fd  = -1;   /* we are the destination */
+                        r->succ_fd  = -1;   /* o próprio nó é o destino */
                         r->state    = FORWARDING;
-                        /* The standard send_route_to_all skips distance>=INF,
-                           so call directly: */
                         char msg[64];
                         snprintf(msg, sizeof(msg), "ROUTE %s 0\n", node.id);
                         for (int j = 0; j < node.neighbor_count; j++)
                             write(node.neighbors[j].fd, msg, strlen(msg));
-                        printf("%s[OK]%s Announced self to all neighbours.\n", GREEN, RESET);
+                        printf("%s[OK]%s Nó anunciado a todos os vizinhos.\n", GREEN, RESET);
                     }
                 }
                 break;
 
-            case 10: /* show routing (sr) dest */
+            case 10: /* sr — apresenta o estado de encaminhamento para um destino */
                 if (arg_net[0] == '\0') {
-                    printf("%s[AVISO]%s Usage: sr <dest>\n", YELLOW, RESET);
+                    printf("%s[AVISO]%s Uso: sr <dest>\n", YELLOW, RESET);
                     break;
                 }
                 if (strcmp(arg_net, node.id) == 0) {
+                    /* O próprio nó é sempre alcançável com distância 0 */
                     printf("\n  dest=%-4s  state=FORWARDING  dist=0  succ=local\n\n",
                            node.id);
                     break;
@@ -266,7 +270,7 @@ int main(int argc, char *argv[]) {
                 {
                     Route *r = find_route(arg_net);
                     if (!r) {
-                        printf("\n%s[ERRO]%s No route to %s.\n\n", RED, RESET, arg_net);
+                        printf("\n%s[ERRO]%s Rota para %s desconhecida.\n\n", RED, RESET, arg_net);
                     } else if (r->state == FORWARDING) {
                         printf("\n  dest=%-4s  state=%sFORWARDING%s  dist=%d  succ_fd=%d\n\n",
                                r->dest, GREEN, RESET, r->distance, r->succ_fd);
@@ -277,21 +281,21 @@ int main(int argc, char *argv[]) {
                 }
                 break;
 
-            case 11: /* start monitor */
+            case 11: /* sm — activa a monitorização de mensagens de encaminhamento */
                 node.monitoring = 1;
-                printf("Monitoring ON.\n");
+                printf("Monitorização activada.\n");
                 break;
 
-            case 12: /* end monitor */
+            case 12: /* em — desactiva a monitorização */
                 node.monitoring = 0;
-                printf("Monitoring OFF.\n");
+                printf("Monitorização desactivada.\n");
                 break;
 
-            case 13: /* message dest text */
+            case 13: /* m — envia mensagem de chat ao nó destino */
                 {
                     Route *r = find_route(arg_net);
                     if (!r || r->state != FORWARDING || r->distance >= 999) {
-                        printf("%s[ERRO]%s No forwarding route to %s.\n",
+                        printf("%s[ERRO]%s Sem rota de expedição para %s.\n",
                                RED, RESET, arg_net);
                         break;
                     }
@@ -302,52 +306,49 @@ int main(int argc, char *argv[]) {
                 }
                 break;
 
-            /* dj / dae (direct join / direct add edge) */
-
-            case 14: /* direct join (dj) net id */
+            case 14: /* dj — adesão directa à rede sem registo no servidor de nós */
                 if (node.is_joined) {
-                    printf("%s[AVISO]%s Already joined net %s.\n", YELLOW, RESET, node.net);
+                    printf("%s[AVISO]%s Já pertence à rede %s.\n", YELLOW, RESET, node.net);
                     break;
                 }
                 strcpy(node.net, arg_net);
                 strcpy(node.id,  arg_id);
                 node.is_joined = 1;
-                printf("%s[OK]%s Joined net %s with id %s (no server registration).\n",
+                printf("%s[OK]%s Adesão directa à rede %s com id %s (sem registo no servidor).\n",
                        GREEN, RESET, node.net, node.id);
                 break;
 
-            case 15: /* direct add edge (dae) id idIP idTCP */
+            case 15: /* dae — estabelece edge directamente sem consultar o servidor de nós */
                 if (!node.is_joined) {
-                    printf("%s[ERRO]%s Join first.\n", RED, RESET);
+                    printf("%s[ERRO]%s Execute join primeiro.\n", RED, RESET);
                     break;
                 }
                 {
-                    /* arg_net = id, arg_id = "idIP idTCP" */
+                    /* arg_net = id do vizinho, arg_id = "IP TCP" */
                     char dae_ip[16] = {0}; int dae_tcp = 0;
                     if (sscanf(arg_id, "%15s %d", dae_ip, &dae_tcp) != 2) {
-                        printf("%s[ERRO]%s Usage: dae <id> <IP> <TCP>\n", RED, RESET);
+                        printf("%s[ERRO]%s Uso: dae <id> <IP> <TCP>\n", RED, RESET);
                         break;
                     }
                     if (strcmp(arg_net, node.id) == 0) {
-                        printf("%s[ERRO]%s Cannot connect to self.\n", RED, RESET);
+                        printf("%s[ERRO]%s Não é possível ligar o nó a si próprio.\n", RED, RESET);
                         break;
                     }
                     int already = 0;
                     for (int i = 0; i < node.neighbor_count; i++)
                         if (strcmp(node.neighbors[i].id, arg_net) == 0) { already = 1; break; }
                     if (already) {
-                        printf("%s[AVISO]%s Node %s is already a neighbour.\n",
-                               YELLOW, RESET, arg_net);
+                        printf("%s[AVISO]%s O nó %s já é vizinho.\n", YELLOW, RESET, arg_net);
                         break;
                     }
                     if (node.neighbor_count >= MAX_NEIGHBORS) {
-                        printf("%s[ERRO]%s Neighbour limit reached.\n", RED, RESET);
+                        printf("%s[ERRO]%s Limite de vizinhos atingido.\n", RED, RESET);
                         break;
                     }
 
                     int fd = setup_tcp_client(dae_ip, dae_tcp);
                     if (fd == -1) {
-                        printf("%s[ERRO]%s TCP connection to %s:%d failed.\n",
+                        printf("%s[ERRO]%s Falha na ligação TCP a %s:%d.\n",
                                RED, RESET, dae_ip, dae_tcp);
                         break;
                     }
@@ -364,7 +365,7 @@ int main(int argc, char *argv[]) {
 
                     on_edge_added(slot);
 
-                    printf("%s[OK]%s Direct edge to %s (%s:%d) established (fd %d).\n",
+                    printf("%s[OK]%s Edge directo com %s (%s:%d) estabelecido (fd %d).\n",
                            GREEN, RESET, arg_net, dae_ip, dae_tcp, fd);
                 }
                 break;
@@ -376,7 +377,7 @@ int main(int argc, char *argv[]) {
             printf("> "); fflush(stdout);
         }
 
-        /* ---- Messages from neighbours ---- */
+        /* ---- Mensagens recebidas dos vizinhos ---- */
         for (int i = 0; i < node.neighbor_count; i++) {
             if (!FD_ISSET(node.neighbors[i].fd, &rfds)) continue;
 
@@ -385,16 +386,19 @@ int main(int argc, char *argv[]) {
             ssize_t n = read(current_fd, buf, sizeof(buf) - 1);
 
             if (n <= 0) {
-                /* Connection closed / error */
+                /* Ligação fechada ou erro — remove o vizinho e despoleta coordenação */
                 on_edge_removed(i);
-                i--;   /* array shrunk */
+                i--;   /* o array foi comprimido */
                 printf("> "); fflush(stdout);
                 continue;
             }
 
             buf[n] = '\0';
 
-            /* Split on '\n' – a single read may contain multiple messages */
+            /*
+             * Um único read() pode conter várias mensagens; divide pelo
+             * separador '\n' e processa cada linha individualmente.
+             */
             char *line = buf;
             char *nl;
             while ((nl = strchr(line, '\n')) != NULL) {
@@ -414,14 +418,10 @@ int main(int argc, char *argv[]) {
                     if (sscanf(line, "%*s %3s", nbr_id) == 1) {
                         strncpy(node.neighbors[i].id, nbr_id, 3);
                         node.neighbors[i].id[3] = '\0';
-
                         /*
-                         * Now that we know their id, exchange routes.
-                         * on_edge_added sends our FORWARDING routes to them;
-                         * they will do the same to us via their own on_edge_added.
-                         * We do NOT create a 1-hop route to them here:
-                         * a direct neighbour only appears in the routing table
-                         * once they announce themselves with "announce".
+                         * Identificador do vizinho agora conhecido — sincroniza
+                         * as rotas de expedição. Não se cria rota directa para
+                         * o vizinho: este só surge na tabela após announce.
                          */
                         on_edge_added(i);
                     }
@@ -445,16 +445,17 @@ int main(int argc, char *argv[]) {
                         handle_uncoord(dest, i);
 
                 } else if (strcmp(cmd, "CHAT") == 0) {
-                    /* ---- CHAT origin dest text ---- */
+                    /* ---- CHAT origem destino texto ---- */
                     char origin[4] = {0}, dest[4] = {0}, text[256] = {0};
                     sscanf(line, "%*s %3s %3s %255[^\r]", origin, dest, text);
 
                     if (strcmp(dest, node.id) == 0) {
-                        printf("\n%s[CHAT]%s from %s: %s\n> ",
+                        /* Mensagem destinada a este nó */
+                        printf("\n%s[CHAT]%s de %s: %s\n> ",
                                GREEN, RESET, origin, text);
                         fflush(stdout);
                     } else {
-                        /* Forward */
+                        /* Reencaminha pelo vizinho de expedição */
                         Route *r = find_route(dest);
                         if (r && r->state == FORWARDING && r->succ_fd != -1) {
                             char fwd[1024];
@@ -462,12 +463,12 @@ int main(int argc, char *argv[]) {
                                      origin, dest, text);
                             write(r->succ_fd, fwd, strlen(fwd));
                             if (node.monitoring) {
-                                printf("\n%s[MONITOR]%s Forwarding CHAT to fd %d\n> ",
+                                printf("\n%s[MONITOR]%s CHAT reencaminhado para fd %d\n> ",
                                        MAGENTA, RESET, r->succ_fd);
                                 fflush(stdout);
                             }
                         } else {
-                            printf("\n%s[AVISO]%s CHAT for %s: no route.\n> ",
+                            printf("\n%s[AVISO]%s CHAT para %s: sem rota.\n> ",
                                    YELLOW, RESET, dest);
                             fflush(stdout);
                         }

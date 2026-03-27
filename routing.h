@@ -6,21 +6,21 @@
 
 typedef enum { FORWARDING, COORDINATION } RouteState;
 
-/* One entry per (local_node, destination) pair */
+/* Uma entrada por par (nó local, destino) */
 typedef struct {
     char dest[4];
 
-    /* --- forwarding state --- */
-    int  distance;       /* dist[t]  – INF represented as 999 */
-    int  succ_fd;        /* succ[t]  – fd of forwarding neighbour, -1 if none */
+    /* --- estado de expedição --- */
+    int  distance;       /* dist[t]  — INF representado por 999 */
+    int  succ_fd;        /* succ[t]  — fd do vizinho de expedição, -1 se inexistente */
 
-    /* --- coordination state --- */
-    RouteState state;            /* state[t]  */
-    int  succ_coord_fd;          /* succ_coord[t] – fd that triggered coordination,
-                                    -1 if triggered by link failure to succ */
+    /* --- estado de coordenação --- */
+    RouteState state;        /* state[t] */
+    int  succ_coord_fd;      /* succ_coord[t] — fd que despoletou a coordenação;
+                                -1 se despoletada por falha de ligação ao sucessor */
 
-    /* coord[t,k] per neighbour slot (index matches node.neighbors[]) */
-    int  coord_pending[MAX_NEIGHBORS]; /* 1 = coordination ongoing with that nbr */
+    /* coord[t,k] por slot de vizinho (índice coincide com node.neighbors[]) */
+    int  coord_pending[MAX_NEIGHBORS]; /* 1 = coordenação em curso com esse vizinho */
 } Route;
 
 typedef struct {
@@ -46,30 +46,30 @@ typedef struct {
 
 extern NodeState node;
 
-/* ---- routing table helpers ---- */
+/* ---- funções auxiliares da tabela de encaminhamento ---- */
 Route *find_route(const char *dest);
 Route *find_or_create_route(const char *dest);
 
-/* ---- protocol event handlers ---- */
+/* ---- tratadores de eventos do protocolo ---- */
 
-/* Called when we add a new neighbour (edge added by us or NEIGHBOR received).
-   new_nbr_slot = index in node.neighbors[] of the new neighbour. */
+/* Invocado após adição de um novo vizinho (edge iniciado localmente ou NEIGHBOR recebido).
+   new_nbr_slot = índice em node.neighbors[] do novo vizinho. */
 void on_edge_added(int new_nbr_slot);
 
-/* Called when a neighbour's fd is detected as closed / manually removed.
-   Removes the neighbour from node.neighbors and triggers coordination. */
+/* Invocado quando o fd de um vizinho é detectado como fechado ou removido manualmente.
+   Remove o vizinho de node.neighbors[] e despoleta coordenação. */
 void on_edge_removed(int nbr_index);
 
-/* Handle incoming ROUTE dest n from neighbour at nbr_index */
+/* Tratamento da mensagem ROUTE dest n recebida do vizinho nbr_index */
 void handle_route(const char *dest, int n, int nbr_index);
 
-/* Handle incoming COORD dest from neighbour at nbr_index */
+/* Tratamento da mensagem COORD dest recebida do vizinho nbr_index */
 void handle_coord(const char *dest, int nbr_index);
 
-/* Handle incoming UNCOORD dest from neighbour at nbr_index */
+/* Tratamento da mensagem UNCOORD dest recebida do vizinho nbr_index */
 void handle_uncoord(const char *dest, int nbr_index);
 
-/* Send ROUTE dest dist[t] to all neighbours (or just one fd) */
+/* Envia ROUTE dest dist[t] a todos os vizinhos, ou apenas ao fd indicado */
 void send_route_to_all(Route *r);
 void send_route_to_fd(Route *r, int fd);
 
